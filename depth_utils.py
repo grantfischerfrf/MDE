@@ -56,18 +56,18 @@ def pull_txt(year, month, day):
 
 def pull_ioeo(year, month, day, camera):
 
-    if os.path.isfile(f'./Depth_Anything_V2/ioeo/{camera}/{year}{month}{day}_{camera}_IOEOInitial.mat'):
-        ioeo = scipy.io.loadmat(f'./Depth_Anything_V2/ioeo/{camera}/{str(year) + str(month) + str(day)}_{camera}_IOEOInitial.mat')
+    if os.path.isfile(f'./ioeo/{camera}/{year}{month}{day}_{camera}_IOEOInitial.mat'):
+        ioeo = scipy.io.loadmat(f'./ioeo/{camera}/{str(year) + str(month) + str(day)}_{camera}_IOEOInitial.mat')
         ioeo = list(ioeo.items())
         extrinsics = ioeo[3][1]
         intrinsics = ioeo[5][1]
         return intrinsics, extrinsics
 
     else:
-        ioeo_list = pull_files(f'./Depth_Anything_V2/ioeo/{camera}')
+        ioeo_list = pull_files(f'./ioeo/{camera}')
         target_date = datetime(int(year), int(month), int(day))
         closest_date = min(ioeo_list, key=lambda date: abs(date - target_date))
-        ioeo = scipy.io.loadmat(f'./Depth_Anything_V2/ioeo/{camera}/{closest_date.year}{closest_date.month:02d}{closest_date.day:02d}_{camera}_IOEOInitial.mat')
+        ioeo = scipy.io.loadmat(f'./ioeo/{camera}/{closest_date.year}{closest_date.month:02d}{closest_date.day:02d}_{camera}_IOEOInitial.mat')
         ioeo = list(ioeo.items())
         extrinsics = ioeo[3][1]
         intrinsics = ioeo[5][1]
