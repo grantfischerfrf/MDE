@@ -1,3 +1,7 @@
+import sys
+sys.path.append('../')
+from pointcloud.main import pull_data, comp_timestamps, find_ref_dict
+
 import cv2
 import os
 import glob
@@ -5,9 +9,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import matplotlib.gridspec as gridspec
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
-def four_panel_plot(sp1, sp2, sp3, sp4, img_path:str, output_path:str):
+def four_panel_plot(sp1, sp2, sp3, sp4, img_path:str, output_path:str, title: str):
 
     # Creates a four panel plot
     fig = plt.figure(figsize=(24, 20))
@@ -49,8 +55,11 @@ def four_panel_plot(sp1, sp2, sp3, sp4, img_path:str, output_path:str):
     cbar2.set_label('Velocity (m/s)', fontsize=15)
     cbar3.set_label('2 * Standard Deviation (m/s)', fontsize=15)
 
+    fig.suptitle(title, fontsize=24, fontweight='bold')
+
     plt.tight_layout()
-    plt.savefig(output_path + os.path.basename(img_path).split('.')[0] + '_velocity_map.png', dpi=200)
+    # plt.savefig(output_path + os.path.basename(img_path).split('.')[0] + '_velocity_map.png', dpi=200)
+    plt.savefig(output_path + img_path + '.png', dpi=200)
     plt.close('all')
 
 
@@ -181,6 +190,214 @@ def error_comparison(est_depths:list, cal_depths:list, labels:list, rmse:list, o
     plt.savefig(f'{os.path.dirname(output_path.rstrip('/'))}/outputs/gcp/allData' + '_gcp_depth_comparison.png', dpi = 180)
     plt.close('all')
 
+
+def panel_plot(model_folder:str, output_path:str):
+
+    # Load the MDE data
+    left_mde = np.load(f'{model_folder}/ms2_left_image_rect_mde.npy', allow_pickle=True).item()
+    right_mde = np.load(f'{model_folder}/ms2_right_image_rect_mde.npy', allow_pickle=True).item()
+    color_mde = np.load(f'{model_folder}/ms2_aux_image_rect_color_mde.npy', allow_pickle=True).item()
+
+    # mde_list = [left_mde, right_mde, color_mde]
+    # mde_dicts = comp_timestamps(mde_list)
+    # sp1 = mde_dicts['left_image_rect_mde']['messages']
+    # sp2 = mde_dicts['right_image_rect_mde']['messages']
+    # sp3 = mde_dicts['aux_image_rect_color_mde']['messages']
+
+    #Load the raw images
+    left_rect = pull_data('/mnt/e/ms_output/ms2/left_image_rect/data.npz')  # rectified left IR
+    right_rect = pull_data('/mnt/e/ms_output/ms2/right_image_rect/data.npz')  # rectified right IR
+    aux_color_rect = pull_data('/mnt/e/ms_output/ms2/aux_image_rect_color/data.npz')  # rectified RGB image
+
+    dict_list = [left_mde, right_mde, color_mde, left_rect, right_rect, aux_color_rect]
+    dicts = comp_timestamps(dict_list)
+    sp1 = dicts['left_image_rect_mde']['messages']
+    sp2 = dicts['right_image_rect_mde']['messages']
+    sp3 = dicts['aux_image_rect_color_mde']['messages']
+    sp4 = dicts['left_image_rect']['messages']
+    sp5 = dicts['right_image_rect']['messages']
+    sp6 = dicts['aux_image_rect_color']['messages']
+
+    for i in range(len(sp1)):
+        fig = plt.figure(figsize=(24, 20))
+        gs = gridspec.GridSpec(2, 3)
+
+        ax1 = fig.add_subplot(gs[0, 0])
+        ax1.imshow(sp4[i], cmap='viridis', aspect='auto')
+        ax1.set_title('left monochrome rect', fontsize=22)
+        ax1.set_xticks([])
+        ax1.set_yticks([])
+
+        ax2 = fig.add_subplot(gs[0, 1])
+        plot2 = ax2.imshow(sp5[i], cmap='viridis', aspect='auto')
+        ax2.set_title('right monochrome rect', fontsize=22)
+        ax2.set_xticks([])
+        ax2.set_yticks([])
+
+        ax3 = fig.add_subplot(gs[0, 2])
+        plot3 = ax3.imshow(sp6[i], aspect='auto')
+        ax3.set_title('RGB image', fontsize=22)
+        ax3.set_xticks([])
+        ax3.set_yticks([])
+
+        ax4 = fig.add_subplot(gs[1, 0])
+        plot4 = ax4.imshow(sp1[i], cmap='tab20', alpha=0.55, vmin=0, vmax=80, aspect='auto')
+        ax4.imshow(sp4[i], alpha=0.45, aspect='auto')
+        ax4.set_title('left monochrome rect MDE', fontsize=22)
+        ax4.set_xticks([])
+        ax4.set_yticks([])
+
+        ax5 = fig.add_subplot(gs[1, 1])
+        plot5 = ax5.imshow(sp2[i], cmap='tab20', alpha=0.55, vmin=0, vmax=80, aspect='auto')
+        ax5.imshow(sp5[i], alpha=0.45, aspect='auto')
+        ax5.set_title('right monochrome rect MDE', fontsize=22)
+        ax5.set_xticks([])
+        ax5.set_yticks([])
+
+        ax6 = fig.add_subplot(gs[1, 2])
+        plot6 = ax6.imshow(sp3[i], alpha=0.55, cmap='tab20', vmin=0, vmax=80, aspect='auto')
+        ax6.imshow(sp6[i], alpha=0.45, aspect='auto')
+        ax6.set_title('RGB mde', fontsize=22)
+        ax6.set_xticks([])
+        ax6.set_yticks([])
+
+        # divider = make_axes_locatable(ax4)
+        # cax = divider.append_axes("right", size="5%", pad=0.05)
+        # cbar = fig.colorbar(plot4, cax=cax, ticks=np.arange(0, 84, 4)[::2])
+        # cbar.set_label('Estimated Depth (m)', fontsize=15)
+        #
+        # divider2 = make_axes_locatable(ax5)
+        # cax2 = divider2.append_axes("right", size="5%", pad=0.05)
+        # cbar2 = fig.colorbar(plot5, cax=cax2, ticks=np.arange(0, 84, 4)[::2])
+        # cbar2.set_label('Estimated Depth (m)', fontsize=15)
+
+        divider3 = make_axes_locatable(ax6)
+        cax3 = divider3.append_axes("right", size="5%", pad=0.05)
+        cbar3 = fig.colorbar(plot6, cax=cax3, ticks=np.arange(0, 84, 4)[::2])
+        cbar3.set_label('Estimated Depth (m)', fontsize=15)
+
+        fig.suptitle(f'MS2 Visualizations', fontsize=22, fontweight='bold', y=1.001)
+
+        plt.tight_layout()
+        plt.savefig(output_path + str(mde_dicts['left_image_rect_mde']['timestamps'][i]) + '.png', dpi=180)
+        plt.close('all')
+
+
+def depth_comp(model_folder:str, output_path:str):
+
+    #pull data
+    # rgb_mde = np.load(f'{model_folder}/ms2_aux_image_rect_color_mde.npy', allow_pickle=True).item()
+    nir_mde = np.load(f'{model_folder}/ms1_left_image_rect_mde.npy', allow_pickle=True).item()
+    left_depth = pull_data('/mnt/e/ms_output/ms1/left_depth/data.npz')
+    # aux_color_rect = pull_data('/mnt/e/ms_output/ms2/aux_image_rect_color/data.npz')
+    nir_left = pull_data('/mnt/e/ms_output/ms1/left_image_rect/data.npz')  # rectified left IR
+
+    dict_list = [nir_mde, left_depth, nir_left]
+    dicts = comp_timestamps(dict_list)
+
+    sp1 = dicts['left_image_rect_mde']['messages']  # MDE Depth
+    sp2 = dicts['left_depth']['messages']  # StereoDepth
+    # sp3 = dicts['aux_image_rect_color']['messages']  # RGB Image
+    sp3 = dicts['left_image_rect']['messages']  # NIR Image
+    sp4 = np.abs(sp2 - sp1) # Absolute Difference between MDE and StereoDepth
+
+    #plot
+    for i in range(len(sp1)):
+        fig = plt.figure(figsize=(20, 10))
+        gs = gridspec.GridSpec(2, 2)
+
+        ax1 = fig.add_subplot(gs[0, 0])
+        plot1 = ax1.imshow(sp1[i], cmap='tab20', aspect='equal', vmin=0, vmax=80)
+        ax1.set_title('NIR MDE Depth Map', fontsize=22)
+        ax1.set_xticks([])
+        ax1.set_yticks([])
+
+        ax2 = fig.add_subplot(gs[0, 1])
+        plot2 = ax2.imshow(sp2[i], cmap = 'tab20', aspect='equal', vmin=0, vmax=80)
+        ax2.set_title('Stereo Depth Map', fontsize=22)
+        ax2.set_xticks([])
+        ax2.set_yticks([])
+
+        ax3 = fig.add_subplot(gs[1, 0])
+        plot3 = ax3.imshow(sp4[i], cmap='Greys', aspect='equal', vmin=0, vmax=10)
+        ax3.set_title('Difference (abs value)', fontsize=22)
+        ax3.set_xticks([])
+        ax3.set_yticks([])
+
+        ax4 = fig.add_subplot(gs[1, 1])
+        ax4.imshow(sp3[i], aspect='equal')
+        ax4.set_title('NIR Image', fontsize=22)
+        ax4.set_xticks([])
+        ax4.set_yticks([])
+
+        divider = make_axes_locatable(ax1)
+        cax1 = divider.append_axes("right", size="5%", pad=0.05)
+        cbar1 = fig.colorbar(plot1, cax=cax1, orientation='vertical', fraction=0.046, pad=0.04, ticks=np.arange(0, 84, 4)[::2])
+        cbar1.ax.tick_params(labelsize=15)
+        cbar1.set_label('Estimated Depth (m)', fontsize=15)
+
+        divider2 = make_axes_locatable(ax2)
+        cax2 = divider2.append_axes("right", size="5%", pad=0.05)
+        cbar2 = fig.colorbar(plot2, cax=cax2, orientation='vertical', fraction=0.046, pad=0.04, ticks=np.arange(0, 84, 4)[::2])
+        cbar2.ax.tick_params(labelsize=15)
+        cbar2.set_label('Estimated Depth (m)', fontsize=15)
+
+        divider3 = make_axes_locatable(ax3)
+        cax3 = divider3.append_axes("right", size="5%", pad=0.05)
+        cbar3 = fig.colorbar(plot3, cax=cax3, orientation='vertical', fraction=0.046, pad=0.04, ticks=np.arange(0, 11, 1))
+        cbar3.ax.tick_params(labelsize=15)
+        cbar3.set_label('Depth Difference (m)', fontsize=15)
+
+        fig.suptitle('Depth Comparison: NIR MDE vs Stereo Depth', fontsize=24, fontweight='bold')
+
+        plt.tight_layout()
+        plt.savefig(output_path + str(dicts['left_image_rect']['timestamps'][i]) + '.png', dpi=180)
+        plt.close('all')
+
+
+def depth_error(model_folder:str, output_path:str):
+
+    #pull data
+    # rgb_mde = np.load(f'{model_folder}/ms2_aux_image_rect_color_mde.npy', allow_pickle=True).item()
+    # left_depth = pull_data('/mnt/e/ms_output/ms2/left_depth/data.npz')
+    nir_mde = np.load(f'{model_folder}/ms1_left_image_rect_mde.npy', allow_pickle=True).item()
+    left_depth = pull_data('/mnt/e/ms_output/ms1/left_depth/data.npz')
+
+    dict_list = [nir_mde, left_depth]
+    dicts = comp_timestamps(dict_list)
+
+    mde_depth = dicts['left_image_rect_mde']['messages']  # MDE Depth
+    stereo_depth = dicts['left_depth']['messages']  # StereoDepth
+
+    # Calculate mean of MDE and stereo depths
+    mean_mde = np.mean(mde_depth, axis=0)
+    stereo_mean = np.mean(stereo_depth, axis=0)
+
+    #remove nans
+    mean_mde = mean_mde[~np.isnan(stereo_mean)]
+    stereo_mean = stereo_mean[~np.isnan(stereo_mean)]
+
+    # remove point < 3m and > 80 m
+    mean_mde_ = mean_mde[(mean_mde > 3) & (mean_mde < 80) & (stereo_mean > 3) & (stereo_mean < 80)]
+    stereo_mean_ = stereo_mean[(mean_mde > 3) & (mean_mde < 80) & (stereo_mean > 3) & (stereo_mean < 80)]
+
+    # Calculate RMSE
+    rmse = np.sqrt(np.mean((mean_mde_ - stereo_mean_) ** 2))
+
+    #plot
+    fig = plt.figure(figsize=(20, 20))
+    ax = fig.add_subplot(111)
+
+    ax.plot(stereo_mean_, mean_mde_, 'ro', markersize=5)
+    ax.set_xlabel('Average Stereo Depth (m)', fontsize=15)
+    ax.set_ylabel('Average MDE Depth (m)', fontsize=15)
+    ax.set_title(f'Average MDE vs Stereo Depth: RMSE = {rmse:.2f}m', fontsize=22)
+    # ax.set_xlim(0, 80)
+    # ax.set_ylim(0, 80)
+    ax.plot([0, 80], [0, 80], 'k--')  # line y=x for reference
+
+    plt.savefig(output_path + 'nir_depth_error_comparison.png', dpi=180)
+    plt.close('all')
 
 
 

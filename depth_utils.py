@@ -3,6 +3,9 @@ import depth_plots
 from image_processing import xyz2DistUV
 from ml_depth_pro.src import depth_pro
 from ZoeDepth.zoedepth.utils.misc import pil_to_batched_tensor
+import sys
+sys.path.append('../')
+from pointcloud.main import pull_data, comp_timestamps, find_ref_dict
 
 import re
 import os
@@ -24,6 +27,28 @@ def numerical_sort(string):
 
     parts = re.split(r'(\d+)', string)
     return [int(part) if part.isdigit() else part for part in parts]
+
+
+def read_image(input):
+
+    if type(input) == str:
+        # uses cv2 to read raw image from file path
+        return cv2.imread(input)
+
+    #if image is already raw array
+    elif input.ndim == 3:
+        return input
+
+    #if image array has no channels expand dimensions
+    else:
+        input = np.expand_dims(input, axis=-1)  # Add channel dimension
+        return input
+
+
+def save_data(save_path: str, data: np.ndarray):
+
+    # Pickles and saves output depth mask from MDE model
+    np.save(save_path, data, allow_pickle=True)
 
 
 def cal_gcpDis(gcp_xyz, extrinsics, ind):
@@ -200,71 +225,30 @@ def create_input(file_path:str, flag:str='video', date:datetime=None, fps=1):
         return img_paths
 
 
-def run_dep_any(model, input:list, fps, gcp=False, date:datetime=None):
+#TODO: write function input and return comments at some point for all of these
 
-        dep_maps = [model.infer_image(cv2.imread(img)) for img in input if os.path.isfile(img)]
+def run_dep_any(model, images, input=None, data_name:str=None):
 
-        depth_avg = gaussian_filter(dep_maps, sigma=3.0)
-        dt = 1 / fps  # set dt for velocity calculation
-        velocities = np.diff(dep_maps, axis=0) / dt
-        stdDev = 2 * np.std(velocities, axis=0)  # twice the STD for 95% of data
+    # dep_maps = [model.infer_image(cv2.imread(img)) for img in input if os.path.isfile(img)]
+    dep_maps = [model.infer_image(read_image(img)) for img in images[:]]
+    #replace raw images with dep_maps in input dict
 
-        mean_depths = np.mean(dep_maps, axis=0)
-        mean_velocity = np.mean(velocities, axis=0)
-        output_path = './Depth_Anything_V2/temp/'
+    if type(input) == dict:
+        input['messages'] = np.array(dep_maps)
+        input['name'] = str(input['name']) + '_mde'
+        save_data(f'./Depth_Anything_V2/data/{data_name}_mde', input)
+        print('Data saved.')
 
-        estimated_depths = []
-        calculated_depths = []
-
-        for i in range(len(velocities)):
-            raw_img = cv2.cvtColor(cv2.imread(input[i]), cv2.COLOR_BGR2RGB)
-
-            if gcp:
-                year = str(date.year)
-                month = f'{date.month:02d}'
-                day = f'{date.day:02d}'
-
-                cam = re.split('_', os.path.basename(input[i]))  # take first image and split string
-                camera = re.split('Cam', cam[0])[1] + cam[1]  # creates string Ex: 'BobA'
-
-                UV, ind, gcp_dis = processGCP(year, month, day, camera)  # process GCP data
-
-                est_dep = dep_maps[i][UV[1], UV[0]] #get estimated UV depth
-                est_vel = velocities[i][UV[1], UV[0]]  # get estimated UV velocity
-
-                # depth_plots.four_panel_gcp_velocity(raw_img, depth_avg[i], velocities[i], stdDev, UV, ind, est_vel, input[i], output_path)
-                # depth_plots.four_panel_plot(raw_img, depth_avg[i], velocities[i], stdDev, input[i], output_path)
-
-                # mean_est_depth = mean_depths[UV[1], UV[0]]  # get mean estimated depth
-                # mean_est_vel = mean_velocity[UV[1], UV[0]]  # get mean estimated velocity
-
-                if i == 0:
-                    depth_plots.error_plot(est_dep, gcp_dis, cal_rmse(est_dep, np.array(gcp_dis)[:,1]), date, camera, output_path)  # create error plot for GCP depths
-                    estimated_depths.extend(est_dep)
-                    calculated_depths.extend(gcp_dis)  # append estimated and calculated depths to lists for error plot
-
-            else:
-                depth_plots.four_panel_plot(raw_img, dep_maps[i], velocities[i], stdDev, input[i], output_path)
-
-        # create gif
-        plot_dir = './Depth_Anything_V2/outputs/gif'
-        temp_dir = './Depth_Anything_V2/temp'
-        create_gif(plot_dir, temp_dir, name=f'{os.path.basename(os.path.dirname(input[0]))}_4hz',image_files_prefix='*', fps=fps)
-
-        return estimated_depths, calculated_depths
+    else:
+        input = np.array(dep_maps)
+        save_data(f'./Depth_Anything_V2/data/{data_name}_mde', input)
+        print('Data saved.')
 
 
-def run_glpn(model, device, input:list, fps:int, gcp=False, date:datetime=None):
+def run_glpn(model, device, input, data_name:str=None):
 
-    # apply log transform to input
-    images = [cv2.imread(img) for img in input if os.path.isfile(img)]
-    cs = [255 / np.log(1 + np.max(img)) for img in images] # log transform constant
-    log_img = [c * np.log(1 + img.astype(np.float32)) for c, img in zip(cs,images)]  # apply log transform to each image
-    log_img = [cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U) for img in log_img]  # normalize to 0-255
-
-    # raw_img = np.array([cv2.resize(cv2.cvtColor(cv2.imread(img), cv2.COLOR_BGR2RGB), (640, 480)) for img in input if os.path.isfile(img)]) #resize for model input and convert images to RGB
-    raw_img = np.array([cv2.resize(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), (640, 480)) for img in log_img]) #resize for model input and convert images to RGB
-    original_shape = cv2.imread(input[0]).shape
+    raw_img = np.array([cv2.resize(cv2.cvtColor(read_image(img), cv2.COLOR_BGR2RGB), (640, 480)) for img in input]) #resize for model input and convert images to RGB
+    original_shape = read_image(input[0]).shape
 
     input_RGB = torch.tensor(raw_img, dtype=torch.float32).permute(0, 3, 1, 2).to(device)  # Convert to tensor and permute to Batch x Channel x Height x Width
     input_RGB = input_RGB/255.0 #normalize input 0-1
@@ -280,21 +264,79 @@ def run_glpn(model, device, input:list, fps:int, gcp=False, date:datetime=None):
     dep_maps = [cv2.resize(pred, (original_shape[1], original_shape[0])) for pred in pred_d]  # Resize to match original image size
     # est_dep = np.transpose(est_dep, (0, 1, 2)) # transpose if needed
 
+    if type(input) == dict:
+        input['messages'] = np.array(dep_maps)
+        input['name'] = str(input['name']) + '_mde'
+        save_data(f'./GLPDepth/data/{data_name}_mde', input)
+        print('Data saved.')
+
+    else:
+        input = np.array(dep_maps)
+        save_data(f'./GLPDepth/data/{data_name}_mde', input)
+        print('Data saved.')
+
+
+def run_dpt_zoe(model, input, data_name:str=None):
+
+    if type(input) == dict:
+        dep_maps = [model.infer_pil(Image.fromarray(img).convert('RGB')) for img in input]
+
+        input['messages'] = np.array(dep_maps)
+        input['name'] = str(input['name']) + '_mde'
+        save_data(f'./ZoeDepth/data/{data_name}_mde', input)
+        print('Data saved.')
+
+    else:
+        dep_maps = [model.infer_pil(Image.open(img).convert('RGB')) for img in input if os.path.isfile(img)]  # load images and convert to RGB
+
+        input = np.array(dep_maps)
+        save_data(f'./ZoeDepth/data/{data_name}_mde', input)
+        print('Data saved.')
+
+
+def run_dep_pro(model, transform, input, data_name:str=None):
+
+    if type(input) == dict:
+        prediction = [model.infer(transform(Image.fromarray(img))) for img in input]
+        dep_maps = [pred['depth'].cpu().numpy() for pred in prediction]  # get depth outputs and bring to cpu
+
+        input['messages'] = np.array(dep_maps)
+        input['name'] = str(input['name']) + '_mde'
+        save_data(f'./ml_depth_pro/data/{data_name}_mde', input)
+        print('Data saved.')
+
+    else:
+        prediction = [model.infer(transform(depth_pro.load_rgb(img)[0])) for img in input if os.path.isfile(img)]  # load images and convert to RGB
+        dep_maps = [pred['depth'].cpu().numpy() for pred in prediction] #get depth outputs and bring to cpu
+
+        input = np.array(dep_maps)
+        save_data(f'./ml_depth_pro/data/{data_name}_mde', input)
+        print('Data saved.')
+
+
+def plot_data(data_path:str, fps, gcp=False, date:datetime=None):
+
+    # Old plotting function, probably doesnt work.
+
     depth_avg = gaussian_filter(dep_maps, sigma=3.0)
     dt = 1 / fps  # set dt for velocity calculation
-    velocities = np.diff(depth_avg, axis=0) / dt
+    velocities = np.diff(dep_maps, axis=0) / dt
     stdDev = 2 * np.std(velocities, axis=0)  # twice the STD for 95% of data
 
-    mean_depths = np.mean(dep_maps, axis=0)
-    mean_velocity = np.mean(velocities, axis=0)
-    output_path = './GLPDepth/temp/'
+    # mean_depths = np.mean(dep_maps, axis=0)
+    # mean_velocity = np.mean(velocities, axis=0)
+    output_path = './Depth_Anything_V2/temp/'
 
     estimated_depths = []
     calculated_depths = []
 
+    counter = 0
     for i in range(len(velocities)):
-        # raw_img = cv2.cvtColor(cv2.imread(input[i]), cv2.COLOR_BGR2RGB)
-        raw_img = log_img[i]  # use log transformed image
+
+        if type(input[i]) == str:
+            raw_img = cv2.cvtColor(cv2.imread(input[i]), cv2.COLOR_BGR2RGB)
+        else:
+            raw_img = read_image(input[i])
 
         if gcp:
             year = str(date.year)
@@ -305,7 +347,8 @@ def run_glpn(model, device, input:list, fps:int, gcp=False, date:datetime=None):
             camera = re.split('Cam', cam[0])[1] + cam[1]  # creates string Ex: 'BobA'
 
             UV, ind, gcp_dis = processGCP(year, month, day, camera)  # process GCP data
-            est_dep = dep_maps[i][UV[1], UV[0]]  # get estimated UV depth
+
+            est_dep = dep_maps[i][UV[1], UV[0]] #get estimated UV depth
             est_vel = velocities[i][UV[1], UV[0]]  # get estimated UV velocity
 
             # depth_plots.four_panel_gcp_velocity(raw_img, depth_avg[i], velocities[i], stdDev, UV, ind, est_vel, input[i], output_path)
@@ -315,133 +358,25 @@ def run_glpn(model, device, input:list, fps:int, gcp=False, date:datetime=None):
             # mean_est_vel = mean_velocity[UV[1], UV[0]]  # get mean estimated velocity
 
             if i == 0:
-                depth_plots.error_plot(est_dep, gcp_dis, cal_rmse(est_dep, np.array(gcp_dis)[:,1]), date, camera,
-                                       output_path)  # create error plot for GCP depths
+                depth_plots.error_plot(est_dep, gcp_dis, cal_rmse(est_dep, np.array(gcp_dis)[:,1]), date, camera, output_path)  # create error plot for GCP depths
                 estimated_depths.extend(est_dep)
                 calculated_depths.extend(gcp_dis)  # append estimated and calculated depths to lists for error plot
 
         else:
-            depth_plots.four_panel_plot(raw_img, depth_avg[i], velocities[i], stdDev, input[i], output_path)
+            depth_plots.four_panel_plot(raw_img, depth_avg[i], velocities[i], stdDev, str(counter), output_path, data_name)
+
+        counter += 1
 
     # create gif
-    plot_dir = './GLPDepth/outputs/gif'
-    temp_dir = './GLPDepth/temp'
-    create_gif(plot_dir, temp_dir, name=f'{os.path.basename(os.path.dirname(input[0]))}_2hz_logir',image_files_prefix='*', fps=fps)
+    plot_dir = './Depth_Anything_V2/outputs/gif'
+    temp_dir = './Depth_Anything_V2/temp'
+    # create_gif(plot_dir, temp_dir, name=f'{os.path.basename(os.path.dirname(input[0]))}_larc',image_files_prefix='*', fps=fps)
+    create_gif(plot_dir, temp_dir, name=data_name, image_files_prefix='*', fps=fps)
 
     return estimated_depths, calculated_depths
 
 
-def run_dpt_zoe(model, input:list, fps:int, gcp=False, date:datetime=None):
-
-    dep_maps = [model.infer_pil(Image.open(img).convert('RGB')) for img in input if os.path.isfile(img)]  # load images and convert to RGB
-
-    depth_avg = gaussian_filter(dep_maps, sigma=3.0)
-    dt = 1 / fps  # set dt for velocity calculation
-    velocities = np.diff(depth_avg, axis=0) / dt
-    stdDev = 2 * np.std(velocities, axis=0)  # twice the STD for 95% of data
-
-    mean_depths = np.mean(dep_maps, axis=0)
-    mean_velocity = np.mean(velocities, axis=0)
-    output_path = './ZoeDepth/temp/'
-
-    estimated_depths = []
-    calculated_depths = []
-
-    for i in range(len(velocities)):
-        raw_img = cv2.cvtColor(cv2.imread(input[i]), cv2.COLOR_BGR2RGB)
-
-        if gcp:
-            year = str(date.year)
-            month = f'{date.month:02d}'
-            day = f'{date.day:02d}'
-
-            cam = re.split('_', os.path.basename(input[i]))  # take first image and split string
-            camera = re.split('Cam', cam[0])[1] + cam[1]  # creates string Ex: 'BobA'
-
-            UV, ind, gcp_dis = processGCP(year, month, day, camera)  # process GCP data
-            est_dep = dep_maps[i][UV[1], UV[0]]  # get estimated UV depth
-            est_vel = velocities[i][UV[1], UV[0]]  # get estimated UV velocity
-
-            # depth_plots.four_panel_gcp_velocity(raw_img, depth_avg[i], velocities[i], stdDev, UV, ind, est_vel, input[i], output_path)
-            # depth_plots.four_panel_plot(raw_img, depth_avg[i], velocities[i], stdDev, input[i], output_path)
-
-            # mean_est_depth = mean_depths[UV[1], UV[0]]  # get mean estimated depth
-            # mean_est_vel = mean_velocity[UV[1], UV[0]]  # get mean estimated velocity
-
-            if i == 0:
-                depth_plots.error_plot(est_dep, gcp_dis, cal_rmse(est_dep, np.array(gcp_dis)[:, 1]), date, camera,
-                                       output_path)  # create error plot for GCP depths
-                estimated_depths.extend(est_dep)
-                calculated_depths.extend(gcp_dis)  # append estimated and calculated depths to lists for error plot
-
-        else:
-            depth_plots.four_panel_plot(raw_img, depth_avg[i], velocities[i], stdDev, input[i], output_path)
-
-    # create gif
-    # plot_dir = './ZoeDepth/outputs/gif'
-    # temp_dir = './ZoeDepth/temp'
-    # create_gif(plot_dir, temp_dir, name=f'{os.path.basename(os.path.dirname(input[0]))}_2hz_dis', image_files_prefix='*beach*', fps=fps)
-
-    return estimated_depths, calculated_depths
-
-
-def run_dep_pro(model, transform, input:list, fps:int, gcp=False, date:datetime=None):
-
-    prediction = [model.infer(transform(depth_pro.load_rgb(img)[0])) for img in input if os.path.isfile(img)]  # load images and convert to RGB
-
-    dep_maps = [pred['depth'].cpu().numpy() for pred in prediction] #get depth outputs and bring to cpu
-
-    depth_avg = gaussian_filter(dep_maps, sigma=3.0)
-    dt = 1 / fps  # set dt for velocity calculation
-    velocities = np.diff(depth_avg, axis=0) / dt
-    stdDev = 2 * np.std(velocities, axis=0)  # twice the STD for 95% of data
-
-    mean_depths = np.mean(dep_maps, axis=0)
-    mean_velocity = np.mean(velocities, axis=0)
-    output_path = './ml_depth_pro/temp/'
-
-    estimated_depths = []
-    calculated_depths = []
-
-    for i in range(len(velocities)):
-        raw_img = cv2.cvtColor(cv2.imread(input[i]), cv2.COLOR_BGR2RGB)
-
-        if gcp:
-            year = str(date.year)
-            month = f'{date.month:02d}'
-            day = f'{date.day:02d}'
-
-            cam = re.split('_', os.path.basename(input[i]))  # take first image and split string
-            camera = re.split('Cam', cam[0])[1] + cam[1]  # creates string Ex: 'BobA'
-
-            UV, ind, gcp_dis = processGCP(year, month, day, camera)  # process GCP data
-            est_dep = dep_maps[i][UV[1], UV[0]]  # get estimated UV depth
-            est_vel = velocities[i][UV[1], UV[0]]  # get estimated UV velocity
-
-            # depth_plots.four_panel_gcp_velocity(raw_img, depth_avg[i], velocities[i], stdDev, UV, ind, est_vel, input[i], output_path)
-            depth_plots.four_panel_plot(raw_img, depth_avg[i], velocities[i], stdDev, input[i], output_path)
-
-            # mean_est_depth = mean_depths[UV[1], UV[0]]  # get mean estimated depth
-            # mean_est_vel = mean_velocity[UV[1], UV[0]]  # get mean estimated velocity
-
-            if i == 0:
-                depth_plots.error_plot(est_dep, gcp_dis, cal_rmse(est_dep, np.array(gcp_dis)[:,1]), date, camera,
-                                       output_path)  # create error plot for GCP depths
-                estimated_depths.extend(est_dep)
-                calculated_depths.extend(gcp_dis)  # append estimated and calculated depths to lists for error plot
-
-        else:
-            depth_plots.four_panel_plot(raw_img, depth_avg[i], velocities[i], stdDev, input[i], output_path)
-
-    # create gif
-    # plot_dir = './ml_depth_pro/outputs/gif'
-    # temp_dir = './ml_depth_pro/temp'
-    # create_gif(plot_dir, temp_dir, name=f'{os.path.basename(os.path.dirname(input[0]))}_2hz_dis',image_files_prefix='*beach*', fps=fps)
-
-    return estimated_depths, calculated_depths
-
-
-def run_towerframes(model, input_path, device:str, run_model:str, gcp:bool=True):
+def run_towerframes(model, input_path, device:str, run_model:str, data_name:str=None, gcp:bool=True):
 
     bob_estDeps = []  # bob cams only
     bob_calDeps = []
@@ -456,16 +391,16 @@ def run_towerframes(model, input_path, device:str, run_model:str, gcp:bool=True)
         for input in inputs:
             # run model - get prediction
             if run_model == 'dep_any':
-                est_dep, cal_dep = run_dep_any(model, input, 2, gcp=gcp, date=day)  #TODO: save a numpy file of the estimated dep map in the data folder
+                run_dep_any(model, input, data_name=data_name)
             elif run_model == 'glpn':
-                est_dep, cal_dep = run_glpn(model, device, input, 2, gcp=gcp, date=day)
+                run_glpn(model, device, input, data_name=data_name)
             elif run_model == 'dpt_zoe':
-                est_dep, cal_dep = run_dpt_zoe(model, input, 2, gcp=gcp, date=day)
+                run_dpt_zoe(model, input, data_name=data_name)
             elif run_model == 'dep_pro':
-                est_dep, cal_dep = run_dep_pro(model, transform, input, 2, gcp=gcp, date=day)
+                run_dep_pro(model, transform, input, data_name=data_name)
 
-            if gcp==True:
-
+            #TODO: est_dep and cal_dep will need to be pulled from elsewhere. probably plot_data - split into other functions
+            if gcp:
                 cam = re.split('_', os.path.basename(input[0]))  # take first image and split string
                 camera = re.split('Cam', cam[0])[1] + cam[1]  # creates string Ex: 'BobA'
 
@@ -478,48 +413,69 @@ def run_towerframes(model, input_path, device:str, run_model:str, gcp:bool=True)
                     mary_estDeps.extend(est_dep)
                     mary_calDeps.extend([cal_dep[i][1] for i in range(len(cal_dep))])
 
-    #save all lists
-    np.savez('./data/dep_pro_gcp.npz',
-             bob_estDeps=bob_estDeps,
-             bob_calDeps=bob_calDeps,
-             mary_estDeps=mary_estDeps,
-             mary_calDeps=mary_calDeps)
+    # #save all lists
+    # np.savez('./data/dep_any_gcp.npz',
+    #          bob_estDeps=bob_estDeps,
+    #          bob_calDeps=bob_calDeps,
+    #          mary_estDeps=mary_estDeps,
+    #          mary_calDeps=mary_calDeps)
 
 
-def run_video(model, input_path, device:str, run_model:str, fps:int=4):
+def run_video(model, input_path, device:str, run_model:str, fps:int=4, data_name:str=None):
 
     for file in input_path[:]:
 
         inputs = create_input(file, 'video', fps=fps)
 
         if run_model == 'dep_any':
-            run_dep_any(model, inputs, fps)
+            run_dep_any(model, inputs, data_name=data_name)
         elif run_model == 'glpn':
-            run_glpn(model, device, inputs, fps)
+            run_glpn(model, device, inputs, data_name=data_name)
         elif run_model == 'dpt_zoe':
-            run_dpt_zoe(model, inputs, fps)
+            run_dpt_zoe(model, inputs, data_name=data_name)
         elif run_model == 'dep_pro':
-            run_dep_pro(model, transform, inputs, fps)
+            run_dep_pro(model, transform, inputs, data_name=data_name)
+
+
+        #TODO: run the plot data with the fps down here
+
+
+def run_rawImages(model, inputs:np.ndarray, device:str, run_model:str, fps:int=1, data_name:str=None):
+
+    #pull data
+    for path, name in zip(inputs, data_name):
+        input = pull_data(path)
+        raw_img = input['messages']
+
+        #run model
+        if run_model == 'dep_any':
+            run_dep_any(model, raw_img, input, data_name=name)
+        elif run_model == 'glpn':
+            run_glpn(model, device, input, data_name=name)
+        elif run_model == 'dpt_zoe':
+            run_dpt_zoe(model, input, data_name=name)
+        elif run_model == 'dep_pro':
+            run_dep_pro(model, transform, input, data_name=name)
 
 
 if __name__ == '__main__':
 
     #select device
-    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-
-    #select model
-    # model = models.dep_any(device, pred='metric')
-    model = models.glpn(device)
-    # model = models.intel_zoe(device)
-    # model, transform = models.dep_pro(device)
-
-    #IR data
-    input_path = ['/mnt/e/surrogate_lwir_data/skyraiderR80D/fov_offshore/20250508F01_SRH701384881_IR_0007_reverseTransit.TS']
-    # processVideo(input_path[0], create_frames=True)
-
-    '''RUN VIDEO'''
-    # input_path = glob.glob('./tower_images/video/*.MOV')
-    run_video(model, input_path, device, run_model='glpn', fps=2)
+    # device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+    #
+    # #select model
+    # # model = models.dep_any(device, pred='metric')
+    # model = models.glpn(device)
+    # # model = models.intel_zoe(device)
+    # # model, transform = models.dep_pro(device)
+    #
+    # #IR data
+    # input_path = ['/mnt/e/surrogate_lwir_data/skyraiderR80D/fov_offshore/20250508F01_SRH701384881_IR_0007_reverseTransit.TS']
+    # # processVideo(input_path[0], create_frames=True)
+    #
+    # '''RUN VIDEO'''
+    # # input_path = glob.glob('./tower_images/video/*.MOV')
+    # run_video(model, input_path, device, run_model='glpn', fps=2)
 
     '''RUN TOWERFRAMES'''
     # input_path = '/mnt/e/towerframes'
