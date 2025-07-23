@@ -5,7 +5,7 @@ from ml_depth_pro.src import depth_pro
 from ZoeDepth.zoedepth.utils.misc import pil_to_batched_tensor
 import sys
 sys.path.append('../')
-from pointcloud.main import pull_data, comp_timestamps, find_ref_dict
+from pointcloud.main import pull_data, comp_timestamps, find_ref_dict  #TODO: put these funcitons inside here
 
 import re
 import os
@@ -223,7 +223,6 @@ def create_input(file_path:str, flag:str='video', date:datetime=None, fps=1):
         img_paths = img_paths[::n]  # take every nth frame based on desired fps
 
         return img_paths
-
 
 #TODO: write function input and return comments at some point for all of these
 
@@ -494,8 +493,6 @@ if __name__ == '__main__':
     #     ['Bob', 'Mary'],
     #     [cal_rmse(bob_estDeps, bob_calDeps), cal_rmse(mary_estDeps, mary_calDeps)],
     #     output_path, vmax=60)  # create error comparison plot for all cameras
-
-
 
     # img = cv2.imread('./tower_images/video/S1031511_IR_forwardTransit/S1031511_IR_forwardTransit_413.jpeg')
     # c = 255 / np.log(1 + np.max(img))  #log transform constant
