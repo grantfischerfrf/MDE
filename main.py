@@ -42,7 +42,7 @@ if __name__ == "__main__":
     # depth_utils.run_rawImages(model, input_path, device, run_model='dep_any', fps=1, data_name=data_name)
 
     '''PLOT DATA'''
-    data = depth_plots.panel_plot(data_folder='./Depth_Anything_V2/data', output_path='./Depth_Anything_V2/outputs/temp/')
+    data = depth_plots.panel_plot(data_folder='./Depth_Anything_V2/data', output_path='./Depth_Anything_V2/outputs/temp/', dataset=None)
 
 
 

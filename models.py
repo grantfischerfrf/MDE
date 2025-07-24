@@ -1,10 +1,10 @@
-#define paths for models
 import torch
 import numpy as np
 import os
 import sys
 import cv2
 
+#define paths for models
 sys.path.append('./Depth_Anything_V2')
 sys.path.append('./Depth_Anything_V2/metric_depth')
 sys.path.append('./DPT')

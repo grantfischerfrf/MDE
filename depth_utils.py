@@ -1,12 +1,9 @@
 import models
-import depth_plots
-from image_processing import xyz2DistUV
+from image_processing import xyz2DistUV  #TODO: something with corefunctions or supportfunctions here
 from ml_depth_pro.src import depth_pro
 from ZoeDepth.zoedepth.utils.misc import pil_to_batched_tensor
-import sys
-sys.path.append('../')
-from pointcloud.main import pull_data, comp_timestamps, find_ref_dict  #TODO: put these funcitons inside here
 
+import sys
 import re
 import os
 import cv2
@@ -23,10 +20,76 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 
 
+#TODO: change file paths from /mnt/e/ for data to the data folder with ms output
+
 def numerical_sort(string):
 
     parts = re.split(r'(\d+)', string)
     return [int(part) if part.isdigit() else part for part in parts]
+
+
+def pull_data(file_path:str):
+
+    try:
+        dict={}
+        data = np.load(file_path, allow_pickle=True)
+        name = os.path.basename(os.path.dirname(file_path))
+        dict['name'] = name
+        dict['messages'] = data['messages']
+        dict['timestamps'] = data['timestamps'] / 1000000000  # Convert nanoseconds to seconds
+        return dict
+
+    except Exception as e:
+        print(f'Error loading file {file_path}: {e}')
+        print('If bad zip file, try manually extracting first')
+
+
+def find_ref_dict(dicts:list):
+
+    #finds the dictionary with the smallest timestamp difference
+    best_dict=None
+    best_diff=float('inf')
+    for d in dicts:
+        timestamps= d['timestamps']
+        dt = timestamps[-1] - timestamps[0]
+        if dt < best_diff:
+            best_diff = dt
+            best_dict = d
+
+    return best_dict
+
+
+def comp_timestamps(dicts:list):
+
+    #Compares timestamps and finds the closest match
+    ref_dict = find_ref_dict(dicts)
+    ref_timestamps = ref_dict['timestamps']
+
+    #loop through the rest of the dictionaries and sort data by timestamps
+    sorted_dict = {}
+    for d in dicts:
+        if d is not ref_dict:
+            d_timestamps = d['timestamps']
+            d_data = d['messages']
+
+            #find the closest match for each timestamp in ref_dict
+            closest_indices = []
+            for ref_time in ref_timestamps:
+                closest_index = np.argmin(np.abs(d_timestamps - ref_time))
+                closest_indices.append(closest_index)
+
+            #sort the data by the closest indices
+            d_sorted_data = d_data[closest_indices]
+            d_sorted_time = d_timestamps[closest_indices]
+
+            d['messages'] = d_sorted_data
+            d['timestamps'] = d_sorted_time
+            sorted_dict[f'{d['name']}'] = d
+
+        else:
+            sorted_dict[f'{d['name']}'] = d
+
+    return sorted_dict
 
 
 def read_image(input):
