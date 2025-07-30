@@ -1,9 +1,7 @@
 import models
 from image_processing import xyz2DistUV  #TODO: something with corefunctions or supportfunctions here
 from ml_depth_pro.src import depth_pro
-from ZoeDepth.zoedepth.utils.misc import pil_to_batched_tensor
 
-import sys
 import re
 import os
 import cv2
@@ -12,14 +10,13 @@ import torch
 import pandas as pd
 import numpy as np
 import scipy
-from scipy.ndimage import gaussian_filter
 from PIL import Image
 from tqdm import tqdm
 from datetime import datetime
 from collections import defaultdict
-import matplotlib.pyplot as plt
 
 
+#TODO: write docstrings for confusing functions
 #TODO: change file paths from /mnt/e/ for data to the data folder with ms output
 
 def numerical_sort(string):
@@ -229,32 +226,6 @@ def cal_rmse(estimated_depths, calculated_depths):
     return np.sqrt(np.sum([(calculated_depths[i] - estimated_depths[i]) ** 2 for i in range(len(calculated_depths))]) / len(calculated_depths))
 
 
-def create_gif(plot_dir, temp_dir, name, image_files_prefix, fps=2):
-
-    # gif_filename = f"{year}{month}{day}_{camera}_{name}.gif"
-    gif_filename = f'{name}.gif'
-    gif_path = os.path.join(plot_dir, gif_filename)
-
-    # Collect and sort image files
-    images = sorted(glob.glob(os.path.join(temp_dir, image_files_prefix + '*')), key=numerical_sort)
-    imgs = [Image.open(img_file) for img_file in images]
-
-    # Save GIF
-    imgs[0].save(gif_path, save_all=True, append_images=imgs[1:], duration=int(1000 / fps), loop=0)
-    print(f"GIF saved to {gif_path}")
-
-    # Save the last frame as PNG
-    # last_frame_filename = f"{year}{month}{day}_{camera}_{name}_last_frame.png"
-    # last_frame_filename = f'{name}_last_frame.png'
-    # last_frame_path = os.path.join(plot_dir, last_frame_filename)
-    # imgs[-1].save(last_frame_path)
-    # print(f"Last frame saved as PNG to {last_frame_path}")
-
-    # Clean out temp directory
-    for img_file in images:
-        os.remove(img_file)
-
-
 def create_input(file_path:str, flag:str='video', date:datetime=None, fps=1):
 
     if flag=='jaiabot':
@@ -287,7 +258,6 @@ def create_input(file_path:str, flag:str='video', date:datetime=None, fps=1):
 
         return img_paths
 
-#TODO: write function input and return comments at some point for all of these
 
 def run_dep_any(model, images, input=None, data_name:str=None):
 
@@ -304,7 +274,9 @@ def run_dep_any(model, images, input=None, data_name:str=None):
     else:
         input = np.array(dep_maps)
         save_data(f'./Depth_Anything_V2/data/{data_name}_mde', input)
-        print('Data saved.')
+        print('Data saved.')  #TODO: may need to add the camera name here at some point
+
+    return dep_maps
 
 
 def run_glpn(model, device, input, data_name:str=None):
@@ -376,69 +348,36 @@ def run_dep_pro(model, transform, input, data_name:str=None):
         print('Data saved.')
 
 
-def plot_data(data_path:str, fps, gcp=False, date:datetime=None):
+def find_GCP_depths(dep_maps, date:datetime, input, fps:int=1):
 
-    # Old plotting function, probably doesnt work.
-
-    depth_avg = gaussian_filter(dep_maps, sigma=3.0)
     dt = 1 / fps  # set dt for velocity calculation
     velocities = np.diff(dep_maps, axis=0) / dt
     stdDev = 2 * np.std(velocities, axis=0)  # twice the STD for 95% of data
 
-    # mean_depths = np.mean(dep_maps, axis=0)
-    # mean_velocity = np.mean(velocities, axis=0)
-    output_path = './Depth_Anything_V2/temp/'
+    year = str(date.year)
+    month = f'{date.month:02d}'
+    day = f'{date.day:02d}'
+
+    cam = re.split('_', os.path.basename(input[0]))  # take first image and split string
+    camera = re.split('Cam', cam[0])[1] + cam[1]  # creates string Ex: 'BobA'
+
+    UV, ind, cal_dep = processGCP(year, month, day, camera)  # process GCP data
 
     estimated_depths = []
     calculated_depths = []
 
-    counter = 0
     for i in range(len(velocities)):
+        est_dep = dep_maps[i][UV[1], UV[0]]  # get estimated UV depth
+        est_vel = velocities[i][UV[1], UV[0]]  # get estimated UV velocity - variable not used, here if needed in the future
 
-        if type(input[i]) == str:
-            raw_img = cv2.cvtColor(cv2.imread(input[i]), cv2.COLOR_BGR2RGB)
-        else:
-            raw_img = read_image(input[i])
+        if i == 0:
+            estimated_depths.extend(est_dep)
+            calculated_depths.extend(cal_dep)
 
-        if gcp:
-            year = str(date.year)
-            month = f'{date.month:02d}'
-            day = f'{date.day:02d}'
-
-            cam = re.split('_', os.path.basename(input[i]))  # take first image and split string
-            camera = re.split('Cam', cam[0])[1] + cam[1]  # creates string Ex: 'BobA'
-
-            UV, ind, gcp_dis = processGCP(year, month, day, camera)  # process GCP data
-
-            est_dep = dep_maps[i][UV[1], UV[0]] #get estimated UV depth
-            est_vel = velocities[i][UV[1], UV[0]]  # get estimated UV velocity
-
-            # depth_plots.four_panel_gcp_velocity(raw_img, depth_avg[i], velocities[i], stdDev, UV, ind, est_vel, input[i], output_path)
-            # depth_plots.four_panel_plot(raw_img, depth_avg[i], velocities[i], stdDev, input[i], output_path)
-
-            # mean_est_depth = mean_depths[UV[1], UV[0]]  # get mean estimated depth
-            # mean_est_vel = mean_velocity[UV[1], UV[0]]  # get mean estimated velocity
-
-            if i == 0:
-                depth_plots.error_plot(est_dep, gcp_dis, cal_rmse(est_dep, np.array(gcp_dis)[:,1]), date, camera, output_path)  # create error plot for GCP depths
-                estimated_depths.extend(est_dep)
-                calculated_depths.extend(gcp_dis)  # append estimated and calculated depths to lists for error plot
-
-        else:
-            depth_plots.four_panel_plot(raw_img, depth_avg[i], velocities[i], stdDev, str(counter), output_path, data_name)
-
-        counter += 1
-
-    # create gif
-    plot_dir = './Depth_Anything_V2/outputs/gif'
-    temp_dir = './Depth_Anything_V2/temp'
-    # create_gif(plot_dir, temp_dir, name=f'{os.path.basename(os.path.dirname(input[0]))}_larc',image_files_prefix='*', fps=fps)
-    create_gif(plot_dir, temp_dir, name=data_name, image_files_prefix='*', fps=fps)
-
-    return estimated_depths, calculated_depths
+    return estimated_depths, calculated_depths, camera
 
 
-def run_towerframes(model, input_path, device:str, run_model:str, data_name:str=None, gcp:bool=True):
+def run_towerframes(model, input_path, device:str, run_model:str, data_name=None, gcp:bool=True, transform=None):
 
     bob_estDeps = []  # bob cams only
     bob_calDeps = []
@@ -446,25 +385,24 @@ def run_towerframes(model, input_path, device:str, run_model:str, data_name:str=
     mary_calDeps = []
 
     date_list = pull_files(input_path)
-    for date in tqdm(date_list):
+    for date, name in tqdm(zip(date_list, data_name), total=(len(date_list))):
         inputs, day = create_input(input_path, 'jaiabot', date)
-        global est_dep, cal_dep
 
         for input in inputs:
             # run model - get prediction
             if run_model == 'dep_any':
-                run_dep_any(model, input, data_name=data_name)
+                dep_maps = run_dep_any(model, input, data_name=name)
             elif run_model == 'glpn':
-                run_glpn(model, device, input, data_name=data_name)
+                dep_maps = run_glpn(model, device, input, data_name=name)
             elif run_model == 'dpt_zoe':
-                run_dpt_zoe(model, input, data_name=data_name)
+                dep_maps = run_dpt_zoe(model, input, data_name=name)
             elif run_model == 'dep_pro':
-                run_dep_pro(model, transform, input, data_name=data_name)
+                dep_maps = run_dep_pro(model, transform, input, data_name=name)
+            else:
+                raise ValueError(f'Unknown model type: {run_model}')
 
-            #TODO: est_dep and cal_dep will need to be pulled from elsewhere. probably plot_data - split into other functions
             if gcp:
-                cam = re.split('_', os.path.basename(input[0]))  # take first image and split string
-                camera = re.split('Cam', cam[0])[1] + cam[1]  # creates string Ex: 'BobA'
+                est_dep, cal_dep, camera = find_GCP_depths(dep_maps, date, input, fps=1)
 
                 # append estimated depths and calculated depths to lists
                 if camera.startswith('Bob'):
@@ -475,34 +413,31 @@ def run_towerframes(model, input_path, device:str, run_model:str, data_name:str=
                     mary_estDeps.extend(est_dep)
                     mary_calDeps.extend([cal_dep[i][1] for i in range(len(cal_dep))])
 
-    # #save all lists
-    # np.savez('./data/dep_any_gcp.npz',
-    #          bob_estDeps=bob_estDeps,
-    #          bob_calDeps=bob_calDeps,
-    #          mary_estDeps=mary_estDeps,
-    #          mary_calDeps=mary_calDeps)
+    #save all lists
+    np.savez(f'./data/{run_model}_gcp.npz',
+             bob_estDeps=bob_estDeps,
+             bob_calDeps=bob_calDeps,
+             mary_estDeps=mary_estDeps,
+             mary_calDeps=mary_calDeps)
 
 
-def run_video(model, input_path, device:str, run_model:str, fps:int=4, data_name:str=None):
+def run_video(model, input_path, device:str, run_model:str, fps:int=4, data_name=None, transform=None):
 
-    for file in input_path[:]:
+    for file, name in zip(input_path[:], data_name):
 
         inputs = create_input(file, 'video', fps=fps)
 
         if run_model == 'dep_any':
-            run_dep_any(model, inputs, data_name=data_name)
+            run_dep_any(model, inputs, data_name=name)
         elif run_model == 'glpn':
-            run_glpn(model, device, inputs, data_name=data_name)
+            run_glpn(model, device, inputs, data_name=name)
         elif run_model == 'dpt_zoe':
-            run_dpt_zoe(model, inputs, data_name=data_name)
+            run_dpt_zoe(model, inputs, data_name=name)
         elif run_model == 'dep_pro':
-            run_dep_pro(model, transform, inputs, data_name=data_name)
+            run_dep_pro(model, transform, inputs, data_name=name)
 
 
-        #TODO: run the plot data with the fps down here
-
-
-def run_rawImages(model, inputs:np.ndarray, device:str, run_model:str, fps:int=1, data_name:str=None):
+def run_rawImages(model, inputs:np.ndarray, device:str, run_model:str, fps:int=1, data_name=None, transform=None):
 
     #pull data
     for path, name in zip(inputs, data_name):

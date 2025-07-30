@@ -1,6 +1,5 @@
 from depth_utils import pull_data
 
-import os
 import cv2
 import numpy as np
 from tqdm import tqdm
@@ -61,46 +60,26 @@ def mask_horizon(raw_image:np.ndarray, canny_thres1:int=170,
         return mask, horizon
 
 
-def load_data(cam:str, dataset:str, data_folder:str):
+def load_ms_output(cam:str, dataset:str, data_folder:str):
 
     # Load data using flag for determining which sensor and which dataset
     # cam can be RGB or NIR
-    # dataset TODO: number the datasets, dataset 0, 1, etc... Using surf and else is too focused
 
     if cam == 'RGB':
 
-        if dataset == 'surf':
-
-            rgb_mde = np.load(f'{data_folder}/ms2_surf_aux_image_rect_color_mde.npy', allow_pickle=True).item() #RGB mde depth
-            left_depth = pull_data('/mnt/e/ms_output_2/ms2_surf/left_depth/data.npz') #stereo depth
-            aux_color_rect = pull_data('/mnt/e/ms_output_2/ms2_surf/aux_image_rect_color/data.npz') #rgb image
-            dict_list = [left_depth, rgb_mde, aux_color_rect]
-            return dict_list
-
-        else:
-
-            rgb_mde = np.load(f'{data_folder}/ms2_aux_image_rect_color_mde.npy', allow_pickle=True).item()
-            left_depth = pull_data('/mnt/e/ms_output/ms2/left_depth/data.npz')
-            aux_color_rect = pull_data('/mnt/e/ms_output/ms2/aux_image_rect_color/data.npz')
-            dict_list = [left_depth, rgb_mde, aux_color_rect]
-            return dict_list
+        rgb_mde = np.load(f'{data_folder}/{dataset}_ms2_aux_image_rect_color_mde.npy', allow_pickle=True).item()  # RGB mde depth
+        left_depth = pull_data(f'./data/{dataset}/ms2/left_depth/data.npz')  # stereo depth
+        aux_color_rect = pull_data(f'./data/{dataset}/ms2/aux_image_rect_color/data.npz')  # rgb image
+        dict_list = [left_depth, rgb_mde, aux_color_rect]
+        return dict_list
 
     if cam == 'NIR':
 
-        if dataset == 'surf':
-            nir_mde = np.load(f'{data_folder}/ms1_surf_left_image_rect_mde.npy', allow_pickle=True).item()
-            left_depth = pull_data('/mnt/e/ms_output_2/ms1_surf/left_depth/data.npz')
-            nir_left = pull_data('/mnt/e/ms_output_2/ms1_surf/left_image_rect/data.npz')  # rectified left IR
-            dict_list = [left_depth, nir_mde, nir_left]
-            return dict_list
-
-        else:
-
-            nir_mde = np.load(f'{data_folder}/ms1_left_image_rect_mde.npy', allow_pickle=True).item()
-            left_depth = pull_data('/mnt/e/ms_output/ms1/left_depth/data.npz')
-            nir_left = pull_data('/mnt/e/ms_output/ms1/left_image_rect/data.npz')  # rectified left IR
-            dict_list = [left_depth, nir_mde, nir_left]
-            return dict_list
+        nir_mde = np.load(f'{data_folder}/{dataset}_ms1_left_image_rect_mde.npy', allow_pickle=True).item()  # NIR mde depth
+        left_depth = pull_data(f'./data/{dataset}/ms1/left_depth/data.npz')  # stereo depth
+        nir_left = pull_data(f'./data/{dataset}/ms1/left_image_rect/data.npz')  # rectified left IR
+        dict_list = [left_depth, nir_mde, nir_left]
+        return dict_list
 
 
 def clip_data(images, mde_depths, stereo_depths, flag:str):

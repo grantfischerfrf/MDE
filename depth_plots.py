@@ -1,30 +1,26 @@
-from depth_utils import comp_timestamps, find_ref_dict
-from plot_utils import load_data, read_dict, clip_data, bin_data
+from depth_utils import comp_timestamps, numerical_sort
+from plot_utils import load_ms_output, read_dict, clip_data, bin_data, cal_rmses
 
-import cv2
-import sys
 import os
 import glob
-from tqdm import tqdm
+import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import matplotlib.gridspec as gridspec
-import mpl_scatter_density
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-
-
+from IPython.display import Image, display
 
 
 def panel_plot(data_folder:str, output_path:str, dataset:str):
 
-    RGB_dict_list = load_data(cam='RGB', dataset=dataset, data_folder=data_folder)
+    RGB_dict_list = load_ms_output(cam='RGB', dataset=dataset, data_folder=data_folder)
     # rename dictionary keys
     for d in RGB_dict_list:
         d['name'] = d['name'] + '_rgb'
 
-    NIR_dict_list = load_data(cam='NIR', dataset=dataset, data_folder=data_folder)
+    NIR_dict_list = load_ms_output(cam='NIR', dataset=dataset, data_folder=data_folder)
 
     dicts = comp_timestamps(RGB_dict_list + NIR_dict_list)
 
@@ -54,7 +50,7 @@ def panel_plot(data_folder:str, output_path:str, dataset:str):
         plot1 = ax1.imshow(rgb_mde_depths[i], cmap='viridis', alpha=0.75, aspect='equal', vmin=0, vmax=80)
         ax1.imshow(rgb_images[i], alpha=0.35, aspect='equal')
         ax1.plot([rgb_horizons[i][0], rgb_horizons[i][1]], [rgb_horizons[i][2], rgb_horizons[i][3]], color='red',linewidth=3)
-        ax1.set_title('RGB MDE Depth Map', fontsize=22)
+        ax1.set_title('MDE Depth Map - RGB', fontsize=22)
         ax1.set_xticks([])
         ax1.set_yticks([])
 
@@ -63,7 +59,7 @@ def panel_plot(data_folder:str, output_path:str, dataset:str):
         plot1b = ax1b.imshow(rgb_stereo_depths[i], cmap='viridis', alpha=0.75, aspect='auto', vmin=0, vmax=80)
         ax1b.imshow(rgb_images[i], alpha=0.35, aspect='equal')
         ax1b.plot([rgb_horizons[i][0], rgb_horizons[i][1]], [rgb_horizons[i][2], rgb_horizons[i][3]], color='red',linewidth=3)
-        ax1b.set_title('RGB Stereo Depth Map', fontsize=22)
+        ax1b.set_title('Stereo Depth Map - RGB', fontsize=22)
         ax1b.set_xticks([])
         ax1b.set_yticks([])
 
@@ -72,7 +68,7 @@ def panel_plot(data_folder:str, output_path:str, dataset:str):
         plot2 = ax2.imshow(nir_mde_depths[i], cmap='viridis', alpha=0.75, aspect='auto', vmin=0, vmax=80)
         ax2.imshow(nir_images[i], alpha=0.35, aspect='equal')
         ax2.plot([nir_horizons[i][0], nir_horizons[i][1]], [nir_horizons[i][2], nir_horizons[i][3]], color='red',linewidth=3)
-        ax2.set_title('NIR MDE Depth Map', fontsize=22)
+        ax2.set_title('MDE Depth Map - NIR', fontsize=22)
         ax2.set_xticks([])
         ax2.set_yticks([])
 
@@ -81,7 +77,7 @@ def panel_plot(data_folder:str, output_path:str, dataset:str):
         plot2b = ax2b.imshow(nir_stereo_depths[i], cmap='viridis', alpha=0.75, aspect='auto', vmin=0, vmax=80)
         ax2b.imshow(nir_images[i], alpha=0.35, aspect='equal')
         ax2b.plot([nir_horizons[i][0], nir_horizons[i][1]], [nir_horizons[i][2], nir_horizons[i][3]], color='red',linewidth=3)
-        ax2b.set_title('NIR Stereo Depth Map', fontsize=22)
+        ax2b.set_title('Stereo Depth Map - NIR', fontsize=22)
         ax2b.set_xticks([])
         ax2b.set_yticks([])
 
@@ -107,13 +103,13 @@ def panel_plot(data_folder:str, output_path:str, dataset:str):
         ax3.plot(nir_X, nir_mde_mean_i, color='black', linewidth=2)
         ax3.fill_between(nir_X, nir_mde_mean_i + 2 * nir_mde_std_dev_i, nir_mde_mean_i - 2 * nir_mde_std_dev_i, color='cyan', alpha=0.5, label='NIR')
 
-        ax3.set_xlabel('Stereo Depth (m)', fontsize=22)
-        ax3.set_ylabel('MDE Depth (m)', fontsize=22)
-        ax3.set_title('MDE v Stereo Depth Estimation', fontsize=25)
+        ax3.set_xlabel('Stereo Depth (m)', fontsize=20)
+        ax3.set_ylabel('MDE Depth (m)', fontsize=20)
+        ax3.set_title('MDE v Stereo Depth Estimates', fontsize=22)
         ax3.set_xlim(0, 80)
         ax3.set_ylim(0, 80)
         ax3.plot([0, 80], [0, 80], 'k--')  # line y=x for reference
-        ax3.tick_params(axis='both', which='major', labelsize=18)
+        ax3.tick_params(axis='both', which='major', labelsize=15)
         ax3.legend(loc = 'upper left', fontsize=9)
 
         # stacked histogram
@@ -141,7 +137,7 @@ def panel_plot(data_folder:str, output_path:str, dataset:str):
         cbar2.ax.tick_params(labelsize=15)
         cbar2.set_label('Estimated Depth (m)', fontsize=15)
 
-        fig.suptitle(f'Error Metrics', fontsize=22, fontweight='bold', y=1.001)
+        fig.suptitle(f'MDE v Stereo Error Metrics for RGB and NIR Images', fontsize=22, fontweight='bold', y=0.999)
 
         # #calculate difference in timestamps between RGB and NIR image
         # rgb_timestamp = dicts['aux_image_rect_color_rgb']['timestamps'][i]
@@ -151,16 +147,17 @@ def panel_plot(data_folder:str, output_path:str, dataset:str):
         plt.tight_layout()
         plt.savefig(output_path + str(dicts['left_image_rect']['timestamps'][i]) + '.png', dpi=180)
         plt.close('all')
+    print('done')
 
 
 def panel_plot_allData(data_folder:str, output_path:str, dataset:str):
 
-    RGB_dict_list = load_data(cam='RGB', dataset=dataset, data_folder=data_folder)
+    RGB_dict_list = load_ms_output(cam='RGB', dataset=dataset, data_folder=data_folder)
     # rename dictionary keys
     for d in RGB_dict_list:
         d['name'] = d['name'] + '_rgb'
 
-    NIR_dict_list = load_data(cam='NIR', dataset=dataset, data_folder=data_folder)
+    NIR_dict_list = load_ms_output(cam='NIR', dataset=dataset, data_folder=data_folder)
 
     dicts = comp_timestamps(RGB_dict_list + NIR_dict_list)
 
@@ -172,6 +169,7 @@ def panel_plot_allData(data_folder:str, output_path:str, dataset:str):
     rgb_X, rgb_mde_mean, rgb_mde_std_dev = bin_data(rgb_stereo_depths_, rgb_mde_depths_, n_bins=81)
     nir_X, nir_mde_mean, nir_mde_std_dev = bin_data(nir_stereo_depths_, nir_mde_depths_, n_bins=81)
 
+    print('Plotting...')
     fig = plt.figure(figsize=(20, 12))
     gs = gridspec.GridSpec(2, 2)
 
@@ -180,7 +178,7 @@ def panel_plot_allData(data_folder:str, output_path:str, dataset:str):
     plot1 = ax1.imshow(rgb_mde_depths[-1], cmap='viridis', alpha=0.75, aspect='auto', vmin=0, vmax=80)
     ax1.imshow(rgb_images[-1], alpha=0.35, aspect='equal')
     ax1.plot([rgb_horizons[-1][0], rgb_horizons[-1][1]], [rgb_horizons[-1][2], rgb_horizons[-1][3]], color='red', linewidth=3)
-    ax1.set_title('RGB MDE Depth Map', fontsize=22)
+    ax1.set_title('MDE Depth Map - RGB', fontsize=22)
     ax1.set_xticks([])
     ax1.set_yticks([])
 
@@ -189,7 +187,7 @@ def panel_plot_allData(data_folder:str, output_path:str, dataset:str):
     plot2 = ax2.imshow(nir_mde_depths[-1], cmap='viridis', alpha=0.75, aspect='auto', vmin=0, vmax=80)
     ax2.imshow(nir_images[-1], alpha=0.35, aspect='equal')
     ax2.plot([nir_horizons[-1][0], nir_horizons[-1][1]], [nir_horizons[-1][2], nir_horizons[-1][3]], color='red', linewidth=3)
-    ax2.set_title('NIR MDE Depth Map', fontsize=22)
+    ax2.set_title('MDE Depth Map - NIR', fontsize=22)
     ax2.set_xticks([])
     ax2.set_yticks([])
 
@@ -215,11 +213,11 @@ def panel_plot_allData(data_folder:str, output_path:str, dataset:str):
 
     ax3.set_xlabel('Stereo Depth (m)', fontsize=22)
     ax3.set_ylabel('MDE Depth (m)', fontsize=22)
-    ax3.set_title('MDE v Stereo Mean Depth Estimation', fontsize=25)
+    ax3.set_title('MDE v Stereo Depth Estimates', fontsize=25)
     ax3.set_xlim(0, 80)
     ax3.set_ylim(0, 80)
     ax3.plot([0, 80], [0, 80], 'k--')  # line y=x for reference
-    ax3.tick_params(axis='both', which='major', labelsize=18)
+    ax3.tick_params(axis='both', which='major', labelsize=20)
     ax3.legend(loc='upper left', fontsize=12)
 
     #stacked histogram
@@ -236,12 +234,12 @@ def panel_plot_allData(data_folder:str, output_path:str, dataset:str):
     ax4.hist(rgb_diff_mean, bins=bins, color='orange', edgecolor='black', density=True, alpha=0.5, label='RGB')
     ax4.hist(nir_diff_mean, bins=bins, color='cyan', edgecolor='black', density=True, alpha=0.5, label='NIR')
 
-    ax4.set_xlabel('Error (m)', fontsize=20)
-    ax4.set_ylabel('Probability Density', fontsize=20)
-    ax4.set_title('MDE - Stereo Mean Depth Error Distribution', fontsize=22)
+    ax4.set_xlabel('Error (m)', fontsize=22)
+    ax4.set_ylabel('Probability Density', fontsize=22)
+    ax4.set_title('MDE - Stereo Depth Error Distribution', fontsize=25)
     ax4.set_xlim(-15, 15)
     ax4.set_ylim(0, 0.3)
-    ax4.tick_params(axis='both', which='major', labelsize=15)
+    ax4.tick_params(axis='both', which='major', labelsize=20)
     ax4.legend(fontsize=18)
 
     divider = make_axes_locatable(ax1)
@@ -256,16 +254,20 @@ def panel_plot_allData(data_folder:str, output_path:str, dataset:str):
     cbar2.ax.tick_params(labelsize=15)
     cbar2.set_label('Estimated Depth (m)', fontsize=15)
 
-    fig.suptitle(f'Error Metrics', fontsize=22, fontweight='bold', y=1.000)
+    fig.suptitle(f'MDE v Stereo Error Metrics for RGB and NIR Images - All Data', fontsize=22, fontweight='bold', y=0.999)
 
     plt.tight_layout()
-    plt.savefig(output_path + 'DepthComp_allData' + '.png', dpi=180)
+    plt.savefig(output_path + f'{dataset}_DepthComp_allData' + '.png', dpi=180)
     plt.close('all')
+    print('done')
+
+    # display figure in notebook
+    display(Image(output_path + f'{dataset}_DepthComp_allData.png', width=800))
 
 
 def depth_comp(data_folder:str, output_path:str, flag:str, dataset:str):
 
-    dict_list = load_data(cam=flag, dataset=dataset, data_folder=data_folder)
+    dict_list = load_ms_output(cam=flag, dataset=dataset, data_folder=data_folder)
 
     dicts = comp_timestamps(dict_list)
 
@@ -277,6 +279,7 @@ def depth_comp(data_folder:str, output_path:str, flag:str, dataset:str):
 
     rmse, rmse_10m, rmse_20m, rmse_40m, rmse_p, rmse_10p, rmse_20p, rmse_40p = cal_rmses(mde_depths_, stereo_depths_, abs_diff)
 
+    print('Plotting...')
     for i in range(len(images)):
         fig = plt.figure(figsize=(20, 10))
         gs = gridspec.GridSpec(2, 2)
@@ -285,7 +288,7 @@ def depth_comp(data_folder:str, output_path:str, flag:str, dataset:str):
         plot1 = ax1.imshow(mde_depths[i], cmap='viridis', alpha=0.75, aspect='equal', vmin=0, vmax=80)
         ax1.imshow(images[i], alpha=0.35, aspect='equal')
         ax1.plot([horizons[i][0], horizons[i][1]], [horizons[i][2], horizons[i][3]], color='red', linewidth=3)
-        ax1.set_title(f'{flag} MDE Depth Map', fontsize=22)
+        ax1.set_title(f'MDE Depth Map - {flag}', fontsize=22)
         ax1.set_xticks([])
         ax1.set_yticks([])
 
@@ -370,14 +373,15 @@ def depth_comp(data_folder:str, output_path:str, flag:str, dataset:str):
         elif flag == 'NIR':
             plt.savefig(output_path + str(dicts['left_image_rect']['timestamps'][i]) + '.png', dpi=180)
         else:
-            raise ValueError(f"Unknown flag: {flag}. Options are 'RGB', 'NIR', or 'BOTH'.")
+            raise ValueError(f"Unknown flag: {flag}. Options are 'RGB' or 'NIR'.")
 
         plt.close('all')
+    print('done')
 
 
 def one_to_one(data_folder:str, output_path:str, flag:str, dataset:str, all_data:bool=False):
 
-    dict_list = load_data(cam=flag, dataset=dataset, data_folder=data_folder)
+    dict_list = load_ms_output(cam=flag, dataset=dataset, data_folder=data_folder)
 
     dicts = comp_timestamps(dict_list)
 
@@ -389,17 +393,19 @@ def one_to_one(data_folder:str, output_path:str, flag:str, dataset:str, all_data
 
     if not all_data:
         #plot one to one plot of stereo and mde depth maps
+        print('Plotting...')
         for i in range(len(mde_depths_)):
             fig = plt.figure(figsize=(20, 20))
             ax = fig.add_subplot(111)
 
             ax.plot(stereo_depths_[i], mde_depths_[i], 'ro', markersize=5, alpha=0.1)
-            ax.set_xlabel('Stereo Depth (m)', fontsize=15)
-            ax.set_ylabel('MDE Depth (m)', fontsize=15)
+            ax.set_xlabel('Stereo Depth (m)', fontsize=20)
+            ax.set_ylabel('MDE Depth (m)', fontsize=20)
             ax.set_title(f'Stereo vs MDE Depth: RMSE = {rmse[i]:.2f}m', fontsize=22)
             ax.plot([0, 80], [0, 80], 'k--')  # line y=x for reference
             ax.set_xlim(0, 80)
             ax.set_ylim(0, 80)
+            ax.tick_params(axis='both', which='major', labelsize=20)
 
             plt.tight_layout()
             if flag == 'RGB':
@@ -407,9 +413,10 @@ def one_to_one(data_folder:str, output_path:str, flag:str, dataset:str, all_data
             elif flag == 'NIR':
                 plt.savefig(output_path + str(dicts['left_image_rect']['timestamps'][i]) + '.png', dpi=180)
             else:
-                raise ValueError(f"Unknown flag: {flag}. Options are 'RGB', 'NIR', or 'BOTH'.")
+                raise ValueError(f"Unknown flag: {flag}. Options are 'RGB' or 'NIR'.")
 
             plt.close('all')
+        print('done')
 
     if all_data:
         # plot scatter plot of all points
@@ -417,20 +424,24 @@ def one_to_one(data_folder:str, output_path:str, flag:str, dataset:str, all_data
         ax = fig.add_subplot(111)
         for i in range(len(mde_depths_)):
             ax.plot(stereo_depths_[i][::10, ::10], mde_depths_[i][::10, ::10], 'r+', markersize=3, alpha=0.1) #scatter plot
-        ax.set_xlabel('Stereo Depth (m)', fontsize=15)
-        ax.set_ylabel('MDE Depth (m)', fontsize=15)
+        ax.set_xlabel('Stereo Depth (m)', fontsize=20)
+        ax.set_ylabel('MDE Depth (m)', fontsize=20)
         ax.set_title(f'Stereo vs MDE Depth: RMSE = {np.mean(rmse):.2f}m', fontsize=22)
         ax.plot([0, 80], [0, 80], 'k--')  # line y=x for reference
         ax.set_xlim(0, 80)
         ax.set_ylim(0, 80)
+        ax.tick_params(axis='both', which='major', labelsize=20)
 
         plt.savefig(output_path + f'{flag}_{dataset}_all_points.png', dpi=180)
         plt.close('all')
 
+        #display figure in notebook
+        display(Image(output_path + f'{flag}_{dataset}_all_points.png', width=800))
 
-def histogram(data_folder:str, output_path:str, flag:str, dataset:str=None):
 
-    dict_list = load_data(cam=flag, dataset=dataset, data_folder=data_folder)
+def histogram(data_folder:str, output_path:str, flag:str, dataset:str=None, all_data:bool=False):
+
+    dict_list = load_ms_output(cam=flag, dataset=dataset, data_folder=data_folder)
 
     dicts = comp_timestamps(dict_list)
 
@@ -438,31 +449,56 @@ def histogram(data_folder:str, output_path:str, flag:str, dataset:str=None):
 
     mde_depths_, stereo_depths_, _ = clip_data(images, mde_depths, stereo_depths, flag)
 
-    for i in range(len(mde_depths_)):
-        #create histogram of all points
+    if not all_data:
+        print('Plotting...')
+        for i in range(len(mde_depths_)):
+            #create histogram of all points
+            fig = plt.figure(figsize=(20, 20))
+            ax = fig.add_subplot(111)
+            ax.hist(mde_depths_[i].flatten() - stereo_depths_[i].flatten(), bins=68, color='blue', edgecolor='black', density=True)
+            ax.set_xlabel('Error (m)', fontsize=20)
+            ax.set_ylabel('Probability Density', fontsize=20)
+            ax.set_title(f'{flag} MDE v Stereo Depth Error Distribution', fontsize=22)
+            ax.set_xlim(-40, 40)
+            ax.set_ylim(0, 0.4)
+            ax.tick_params(axis='both', which='major', labelsize=20)
+
+            if flag == 'RGB':
+                plt.savefig(output_path + str(dicts['aux_image_rect_color']['timestamps'][i]) + '.png', dpi=180)
+            elif flag == 'NIR':
+                plt.savefig(output_path + str(dicts['left_image_rect']['timestamps'][i]) + '.png', dpi=180)
+            else:
+                raise ValueError(f"Unknown flag: {flag}. Options are 'RGB' or 'NIR'.")
+
+            plt.close('all')
+        print('done')
+
+    if all_data:
+        diff = mde_depths_ - stereo_depths_
+        print(np.shape(diff))
+        diff_mean = np.nanmean(diff, axis=(1, 2))  # Mean difference across all images
+        print(np.shape(diff_mean))
+
         fig = plt.figure(figsize=(20, 20))
         ax = fig.add_subplot(111)
-        ax.hist(mde_depths_[i].flatten() - stereo_depths_[i].flatten(), bins=68, color='blue', edgecolor='black', density=True)
+        ax.hist(diff_mean.flatten(), bins=34, color='blue', edgecolor='black', density=True)
         ax.set_xlabel('Error (m)', fontsize=20)
         ax.set_ylabel('Probability Density', fontsize=20)
-        ax.set_title('RGB MDE v Stereo Depth Error', fontsize=22)
+        ax.set_title(f'{flag} MDE v Stereo Depth Error Distribution', fontsize=22)
         ax.set_xlim(-40, 40)
         ax.set_ylim(0, 0.4)
-        ax.tick_params(axis='both', which='major', labelsize=15)
+        ax.tick_params(axis='both', which='major', labelsize=20)
 
-        if flag == 'RGB':
-            plt.savefig(output_path + str(dicts['aux_image_rect_color']['timestamps'][i]) + '.png', dpi=180)
-        elif flag == 'NIR':
-            plt.savefig(output_path + str(dicts['left_image_rect']['timestamps'][i]) + '.png', dpi=180)
-        else:
-            raise ValueError(f"Unknown flag: {flag}. Options are 'RGB', 'NIR', or 'BOTH'.")
-
+        plt.savefig(output_path + f'{flag}_{dataset}_hist_allData.png', dpi=180)
         plt.close('all')
+
+        # display figure in notebook
+        display(Image(output_path + f'{flag}_{dataset}_hist_allData.png', width=800))
 
 
 def heatmap(data_folder:str, output_path:str, flag:str, dataset:str=None, all_data:bool=False):
 
-    dict_list = load_data(cam=flag, dataset=dataset, data_folder=data_folder)
+    dict_list = load_ms_output(cam=flag, dataset=dataset, data_folder=data_folder)
 
     dicts = comp_timestamps(dict_list)
 
@@ -472,6 +508,7 @@ def heatmap(data_folder:str, output_path:str, flag:str, dataset:str=None, all_da
 
     if not all_data:
         # plot scatter density/heatmap of all points
+        print('Plotting...')
         for i in range(len(mde_depths_)):
 
             #filter out nans
@@ -483,11 +520,11 @@ def heatmap(data_folder:str, output_path:str, flag:str, dataset:str=None, all_da
             ax.hist2d(stereo_depth.flatten(), mde_depth.flatten(), bins=68, cmap='hot_r', norm=colors.LogNorm(), range=((0, 80), (0, 80)))
             ax.set_xlabel('Stereo Depth (m)', fontsize=20)
             ax.set_ylabel('MDE Depth (m)', fontsize=20)
-            ax.set_title('Stereo v MDE depth Heatmap', fontsize=22)
+            ax.set_title('MDE v Stereo Depth Heatmap', fontsize=22)
             ax.set_xlim(0, 80)
             ax.set_ylim(0, 80)
             ax.plot([0, 80], [0, 80], color='magenta', linestyle='--')  # line y=x for reference
-            ax.tick_params(axis='both', which='major', labelsize=15)
+            ax.tick_params(axis='both', which='major', labelsize=20)
 
             #colorbar
             divider = make_axes_locatable(ax)
@@ -501,9 +538,10 @@ def heatmap(data_folder:str, output_path:str, flag:str, dataset:str=None, all_da
             elif flag == 'NIR':
                 plt.savefig(output_path + str(dicts['left_image_rect']['timestamps'][i]) + '.png', dpi=180)
             else:
-                raise ValueError(f"Unknown flag: {flag}. Options are 'RGB', 'NIR', or 'BOTH'.")
+                raise ValueError(f"Unknown flag: {flag}. Options are 'RGB' or 'NIR'.")
 
             plt.close('all')
+        print('done')
 
     if all_data:
         #create heatmap for total dataset
@@ -516,11 +554,11 @@ def heatmap(data_folder:str, output_path:str, flag:str, dataset:str=None, all_da
         ax.hist2d(stereo_depth.flatten(), mde_depth.flatten(), bins=136, cmap='hot_r', norm=colors.LogNorm(), range=((0, 80), (0, 80)))
         ax.set_xlabel('Stereo Depth (m)', fontsize=20)
         ax.set_ylabel('MDE Depth (m)', fontsize=20)
-        ax.set_title('Stereo v MDE depth Heatmap', fontsize=22)
+        ax.set_title('MDE v Stereo Depth Heatmap', fontsize=22)
         ax.set_xlim(0, 80)
         ax.set_ylim(0, 80)
         ax.plot([0, 80], [0, 80], color='magenta', linestyle='--')  # line y=x for reference
-        ax.tick_params(axis='both', which='major', labelsize=15)
+        ax.tick_params(axis='both', which='major', labelsize=20)
 
         # colorbar
         divider = make_axes_locatable(ax)
@@ -532,10 +570,13 @@ def heatmap(data_folder:str, output_path:str, flag:str, dataset:str=None, all_da
         plt.savefig(output_path + f'{flag}_{dataset}_total_heatmap.png', dpi=180)
         plt.close('all')
 
+        # display figure in notebook
+        display(Image(output_path + f'{flag}_{dataset}_total_heatmap.png', width=800))
 
-def fill_plot(data_folder:str, output_path:str, flag:str, dataset:str=None):
 
-    dict_list = load_data(cam=flag, dataset=dataset, data_folder=data_folder)
+def fill_plot(data_folder:str, output_path:str, flag:str, dataset:str=None, all_data:bool=False):
+
+    dict_list = load_ms_output(cam=flag, dataset=dataset, data_folder=data_folder)
 
     dicts = comp_timestamps(dict_list)
 
@@ -545,14 +586,46 @@ def fill_plot(data_folder:str, output_path:str, flag:str, dataset:str=None):
 
     X, mde_mean, mde_std_dev = bin_data(stereo_depths_, mde_depths_, n_bins=81)
 
-    print('Plotting...')
-    # create fill between plot
-    for i in range(np.array(mde_mean).shape[1]):
+    if not all_data:
+        print('Plotting...')
+        # create fill between plot
+        for i in range(np.array(mde_mean).shape[1]):
+            fig = plt.figure(figsize=(20, 20))
+            ax = fig.add_subplot(111)
+
+            mde_mean_i = np.array(mde_mean)[:, i]
+            mde_std_dev_i = np.array(mde_std_dev)[:, i]
+
+            ax.plot(X, mde_mean_i + mde_std_dev_i, color='red', linestyle='--', linewidth=2, label='+ 1 Standard Deviation')
+            ax.plot(X, mde_mean_i - mde_std_dev_i, color='blue', linestyle='--', linewidth=2, label='- 1 Standard Deviation')
+            ax.plot(X, mde_mean_i + 2*mde_std_dev_i, color='red', linewidth=2, label='+ 2 Standard Deviation')
+            ax.plot(X, mde_mean_i - 2*mde_std_dev_i, color='blue', linewidth=2, label='- 2 Standard Deviation')
+            ax.plot(X, mde_mean_i, color='black', linewidth=2, label='MDE Mean Depth')
+            ax.fill_between(X, mde_mean_i + 2*mde_std_dev_i, mde_mean_i - 2*mde_std_dev_i, color='green', alpha=0.2)
+            ax.set_xlabel('Stereo Depth (m)', fontsize=22)
+            ax.set_ylabel('MDE Depth (m)', fontsize=22)
+            ax.set_title('MDE v Stereo Depth Estimates', fontsize=25)
+            ax.set_xlim(0, 80)
+            ax.set_ylim(0, 80)
+            ax.plot([0, 80], [0, 80], 'k--')  # line y=x for reference
+            ax.tick_params(axis='both', which='major', labelsize=20)
+            ax.legend(fontsize=20)
+
+            if flag == 'RGB':
+                plt.savefig(output_path + str(dicts['aux_image_rect_color']['timestamps'][i]) + '.png', dpi=180)
+            elif flag == 'NIR':
+                plt.savefig(output_path + str(dicts['left_image_rect']['timestamps'][i]) + '.png', dpi=180)
+            else:
+                raise ValueError(f"Unknown flag: {flag}. Options are 'RGB' or 'NIR'.")
+
+            plt.close('all')
+        print('done')
+
+    if all_data:
         fig = plt.figure(figsize=(20, 20))
         ax = fig.add_subplot(111)
-
-        mde_mean_i = np.array(mde_mean)[:, i]
-        mde_std_dev_i = np.array(mde_std_dev)[:, i]
+        mde_mean_i = np.nanmean(np.array(mde_mean), axis=1)
+        mde_std_dev_i = np.nanmean(np.array(mde_std_dev), axis=1)
 
         ax.plot(X, mde_mean_i + mde_std_dev_i, color='red', linestyle='--', linewidth=2, label='+ 1 Standard Deviation')
         ax.plot(X, mde_mean_i - mde_std_dev_i, color='blue', linestyle='--', linewidth=2, label='- 1 Standard Deviation')
@@ -560,33 +633,31 @@ def fill_plot(data_folder:str, output_path:str, flag:str, dataset:str=None):
         ax.plot(X, mde_mean_i - 2*mde_std_dev_i, color='blue', linewidth=2, label='- 2 Standard Deviation')
         ax.plot(X, mde_mean_i, color='black', linewidth=2, label='MDE Mean Depth')
         ax.fill_between(X, mde_mean_i + 2*mde_std_dev_i, mde_mean_i - 2*mde_std_dev_i, color='green', alpha=0.2)
+
         ax.set_xlabel('Stereo Depth (m)', fontsize=22)
         ax.set_ylabel('MDE Depth (m)', fontsize=22)
-        ax.set_title('Stereo v MDE Depth Mean and Standard Deviation', fontsize=25)
+        ax.set_title('MDE v Stereo Depth Estimates', fontsize=25)
         ax.set_xlim(0, 80)
         ax.set_ylim(0, 80)
         ax.plot([0, 80], [0, 80], 'k--')  # line y=x for reference
-        ax.tick_params(axis='both', which='major', labelsize=18)
+        ax.tick_params(axis='both', which='major', labelsize=20)
         ax.legend(fontsize=20)
 
-        if flag == 'RGB':
-            plt.savefig(output_path + str(dicts['aux_image_rect_color']['timestamps'][i]) + '.png', dpi=180)
-        elif flag == 'NIR':
-            plt.savefig(output_path + str(dicts['left_image_rect']['timestamps'][i]) + '.png', dpi=180)
-        else:
-            raise ValueError(f"Unknown flag: {flag}. Options are 'RGB', 'NIR', or 'BOTH'.")
-
+        plt.savefig(output_path + f'{flag}_{dataset}_all_data.png', dpi=180)
         plt.close('all')
+
+        # display figure in notebook
+        display(Image(output_path + f'{flag}_{dataset}_all_data.png', width=800))
 
 
 def fill_overlay(data_folder:str, output_path:str, dataset:str, all_data:bool=False):
 
-    RGB_dict_list = load_data(cam='RGB', dataset=dataset, data_folder=data_folder)
+    RGB_dict_list = load_ms_output(cam='RGB', dataset=dataset, data_folder=data_folder)
     # rename dictionary keys
     for d in RGB_dict_list:
         d['name'] = d['name'] + '_rgb'
 
-    NIR_dict_list = load_data(cam='NIR', dataset=dataset, data_folder=data_folder)
+    NIR_dict_list = load_ms_output(cam='NIR', dataset=dataset, data_folder=data_folder)
 
     dicts = comp_timestamps(RGB_dict_list + NIR_dict_list)
 
@@ -598,9 +669,9 @@ def fill_overlay(data_folder:str, output_path:str, dataset:str, all_data:bool=Fa
     rgb_X, rgb_mde_mean, rgb_mde_std_dev = bin_data(rgb_stereo_depths_, rgb_mde_depths_, n_bins=81)
     nir_X, nir_mde_mean, nir_mde_std_dev = bin_data(nir_stereo_depths_, nir_mde_depths_, n_bins=81)
 
-    print('Plotting...')
     # create fill between plot
     if not all_data:
+        print('Plotting...')
         for i in range(np.array(rgb_mde_mean).shape[1]):
             fig = plt.figure(figsize=(20, 20))
             ax = fig.add_subplot(111)
@@ -611,8 +682,7 @@ def fill_overlay(data_folder:str, output_path:str, dataset:str, all_data:bool=Fa
             nir_mde_std_dev_i = np.array(nir_mde_std_dev)[:, i]
 
             ax.plot(rgb_X, rgb_mde_mean_i + rgb_mde_std_dev_i, color='red', linestyle='--', linewidth=2, label='+ 1 Standard Deviation')
-            ax.plot(rgb_X, rgb_mde_mean_i - rgb_mde_std_dev_i, color='blue', linestyle='--', linewidth=2,
-                    label='- 1 Standard Deviation')
+            ax.plot(rgb_X, rgb_mde_mean_i - rgb_mde_std_dev_i, color='blue', linestyle='--', linewidth=2, label='- 1 Standard Deviation')
             ax.plot(rgb_X, rgb_mde_mean_i + 2 * rgb_mde_std_dev_i, color='red', linewidth=2, label='+ 2 Standard Deviation')
             ax.plot(rgb_X, rgb_mde_mean_i - 2 * rgb_mde_std_dev_i, color='blue', linewidth=2, label='- 2 Standard Deviation')
             ax.plot(rgb_X, rgb_mde_mean_i, color='black', linewidth=2, label='MDE Mean Depth')
@@ -627,15 +697,16 @@ def fill_overlay(data_folder:str, output_path:str, dataset:str, all_data:bool=Fa
 
             ax.set_xlabel('Stereo Depth (m)', fontsize=22)
             ax.set_ylabel('MDE Depth (m)', fontsize=22)
-            ax.set_title('Stereo v MDE Depth Mean and Standard Deviation', fontsize=25)
+            ax.set_title('MDE v Stereo Depth Estimates', fontsize=25)
             ax.set_xlim(0, 80)
             ax.set_ylim(0, 80)
             ax.plot([0, 80], [0, 80], 'k--')  # line y=x for reference
-            ax.tick_params(axis='both', which='major', labelsize=18)
+            ax.tick_params(axis='both', which='major', labelsize=20)
             ax.legend(fontsize=20)
 
             plt.savefig(output_path + str(dicts['left_image_rect']['timestamps'][i]) + '.png', dpi=180)
             plt.close('all')
+        print('done')
 
     #plot fill overlay for the entire dataset
     if all_data:
@@ -661,25 +732,28 @@ def fill_overlay(data_folder:str, output_path:str, dataset:str, all_data:bool=Fa
 
         ax.set_xlabel('Stereo Depth (m)', fontsize=22)
         ax.set_ylabel('MDE Depth (m)', fontsize=22)
-        ax.set_title('Stereo v MDE Depth Mean and Standard Deviation', fontsize=25)
+        ax.set_title('MDE v Stereo Depth Estimates', fontsize=25)
         ax.set_xlim(0, 80)
         ax.set_ylim(0, 80)
         ax.plot([0, 80], [0, 80], 'k--')  # line y=x for reference
-        ax.tick_params(axis='both', which='major', labelsize=18)
+        ax.tick_params(axis='both', which='major', labelsize=20)
         ax.legend(fontsize=20)
 
-        plt.savefig(output_path + 'fill_overlay_allPoints' + '.png', dpi=180)
+        plt.savefig(output_path + f'{dataset}_fill_overlay_allPoints' + '.png', dpi=180)
         plt.close('all')
 
+        # display figure in notebook
+        display(Image(output_path + f'{dataset}_fill_overlay_allPoints.png', width=800))
 
-def one_to_one_overlay(data_folder:str, output_path:str, dataset:str):
 
-    RGB_dict_list = load_data(cam='RGB', dataset=dataset, data_folder=data_folder)
+def one_to_one_overlay(data_folder:str, output_path:str, dataset:str, all_data:bool=False):
+
+    RGB_dict_list = load_ms_output(cam='RGB', dataset=dataset, data_folder=data_folder)
     # rename dictionary keys
     for d in RGB_dict_list:
         d['name'] = d['name'] + '_rgb'
 
-    NIR_dict_list = load_data(cam='NIR', dataset=dataset, data_folder=data_folder)
+    NIR_dict_list = load_ms_output(cam='NIR', dataset=dataset, data_folder=data_folder)
 
     dicts = comp_timestamps(RGB_dict_list + NIR_dict_list)
 
@@ -690,37 +764,67 @@ def one_to_one_overlay(data_folder:str, output_path:str, dataset:str):
 
     rgb_rmse = np.sqrt(np.nanmean((rgb_stereo_depths_ - rgb_mde_depths_)**2, axis=(1, 2)))
     nir_rmse = np.sqrt(np.nanmean((nir_stereo_depths_ - nir_mde_depths_)**2, axis=(1, 2)))
+    if not all_data:
+        fig = plt.figure(figsize=(20, 20))
+        ax = fig.add_subplot(111)
+        print('Plotting...')
+        for i in range(len(rgb_mde_depths_)):
+            ax.plot(rgb_stereo_depths_[i][::20, ::20], rgb_mde_depths_[i][::20, ::20], 'r+', markersize=3, alpha=0.1,
+                    label='RGB')
+            ax.plot(nir_stereo_depths_[i][::20, ::20], nir_mde_depths_[i][::20, ::20], 'b+', markersize=3, alpha=0.1,
+                    label='NIR')
 
-    fig = plt.figure(figsize=(20, 20))
-    ax = fig.add_subplot(111)
-    print('plotting...')
-    for i in range(len(rgb_mde_depths_)):
-        ax.plot(rgb_stereo_depths_[i][::20, ::20], rgb_mde_depths_[i][::20, ::20],'r+', markersize=3, alpha=0.1, label='RGB')
-        ax.plot(nir_stereo_depths_[i][::20, ::20], nir_mde_depths_[i][::20, ::20],'b+', markersize=3, alpha=0.1, label='NIR')
+            ax.annotate(f'RGB RMSE: {np.nanmean(rgb_rmse):.2f} m', xy=(0.05, 0.95), xycoords='axes fraction',
+                        fontsize=20, color='red')
+            ax.annotate(f'NIR RMSE: {np.nanmean(nir_rmse):.2f} m', xy=(0.05, 0.90), xycoords='axes fraction',
+                        fontsize=20, color='blue')
 
-    ax.annotate(f'RGB RMSE: {np.nanmean(rgb_rmse):.2f} m', xy=(0.05, 0.95), xycoords='axes fraction', fontsize=20, color='red')
-    ax.annotate(f'NIR RMSE: {np.nanmean(nir_rmse):.2f} m', xy=(0.05, 0.90), xycoords='axes fraction', fontsize=20, color='blue')
+            ax.set_xlabel('Stereo Depth (m)', fontsize=22)
+            ax.set_ylabel('MDE Depth (m)', fontsize=22)
+            ax.set_title('Stereo v MDE Depth', fontsize=25)
+            ax.set_xlim(0, 80)
+            ax.set_ylim(0, 80)
+            ax.plot([0, 80], [0, 80], 'k--')  # line y=x for reference
+            ax.tick_params(axis='both', which='major', labelsize=20)
 
-    ax.set_xlabel('Stereo Depth (m)', fontsize=22)
-    ax.set_ylabel('MDE Depth (m)', fontsize=22)
-    ax.set_title('Stereo v MDE Depth', fontsize=25)
-    ax.set_xlim(0, 80)
-    ax.set_ylim(0, 80)
-    ax.plot([0, 80], [0, 80], 'k--')  # line y=x for reference
-    ax.tick_params(axis='both', which='major', labelsize=18)
+            plt.savefig(output_path + str(dicts['left_image_rect']['timestamps'][i]) + '.png', dpi=180)
+            plt.close('all')
+        print('done')
 
-    plt.savefig(output_path + 'RGB v NIR_allPoints.png', dpi=180)
-    plt.close('all')
+
+    if all_data:
+        fig = plt.figure(figsize=(20, 20))
+        ax = fig.add_subplot(111)
+        for i in range(len(rgb_mde_depths_)):
+            ax.plot(rgb_stereo_depths_[i][::20, ::20], rgb_mde_depths_[i][::20, ::20],'r+', markersize=3, alpha=0.1, label='RGB')
+            ax.plot(nir_stereo_depths_[i][::20, ::20], nir_mde_depths_[i][::20, ::20],'b+', markersize=3, alpha=0.1, label='NIR')
+
+        ax.annotate(f'RGB RMSE: {np.nanmean(rgb_rmse):.2f} m', xy=(0.05, 0.95), xycoords='axes fraction', fontsize=20, color='red')
+        ax.annotate(f'NIR RMSE: {np.nanmean(nir_rmse):.2f} m', xy=(0.05, 0.90), xycoords='axes fraction', fontsize=20, color='blue')
+
+        ax.set_xlabel('Stereo Depth (m)', fontsize=22)
+        ax.set_ylabel('MDE Depth (m)', fontsize=22)
+        ax.set_title('Stereo v MDE Depth', fontsize=25)
+        ax.set_xlim(0, 80)
+        ax.set_ylim(0, 80)
+        ax.plot([0, 80], [0, 80], 'k--')  # line y=x for reference
+        ax.tick_params(axis='both', which='major', labelsize=20)
+
+        plt.savefig(output_path + f'RGB v NIR_allPoints_{dataset}.png', dpi=180)
+        plt.close('all')
+
+        # display figure in notebook
+        display(Image(output_path + f'RGB v NIR_allPoints_{dataset}.png', width=800))
 
 
 def histogram_stack(data_folder:str, output_path:str, dataset:str, all_data:bool=False):
 
-    RGB_dict_list = load_data(cam='RGB', dataset=dataset, data_folder=data_folder)
+    RGB_dict_list = load_ms_output(cam='RGB', dataset=dataset, data_folder=data_folder)
     # rename dictionary keys
     for d in RGB_dict_list:
         d['name'] = d['name'] + '_rgb'
 
-    NIR_dict_list = load_data(cam='NIR', dataset=dataset, data_folder=data_folder)
+    NIR_dict_list = load_ms_output(cam='NIR', dataset=dataset, data_folder=data_folder)
 
     dicts = comp_timestamps(RGB_dict_list + NIR_dict_list)
 
@@ -738,6 +842,7 @@ def histogram_stack(data_folder:str, output_path:str, dataset:str, all_data:bool
         combined_max = np.nanmax(np.concatenate([rgb_diff.flatten(), nir_diff.flatten()]))
         bins = np.linspace(combined_min, combined_max, 69)  # define edges for consistent bin widths
 
+        print('Plotting...')
         for i in range(len(rgb_mde_depths_)):
             # create stacked histogram of RGB and NIR depths
             fig = plt.figure(figsize=(20, 20))
@@ -751,14 +856,15 @@ def histogram_stack(data_folder:str, output_path:str, dataset:str, all_data:bool
 
             ax.set_xlabel('Error (m)', fontsize=20)
             ax.set_ylabel('Probability Density', fontsize=20)
-            ax.set_title('RGB & NIR MDE v Stereo Depth Error', fontsize=22)
+            ax.set_title('MDE - Stereo Depth Error Distribution', fontsize=22)
             ax.set_xlim(-40, 40)
             ax.set_ylim(0, 0.3)
-            ax.tick_params(axis='both', which='major', labelsize=15)
+            ax.tick_params(axis='both', which='major', labelsize=20)
             ax.legend(fontsize=18)
 
             plt.savefig(output_path + str(dicts['left_image_rect']['timestamps'][i]) + '.png', dpi=180)
             plt.close('all')
+        print('done')
 
     if all_data:
         #plot histogram stack for the entire dataset
@@ -777,18 +883,216 @@ def histogram_stack(data_folder:str, output_path:str, dataset:str, all_data:bool
 
         ax.set_xlabel('Error (m)', fontsize=20)
         ax.set_ylabel('Probability Density', fontsize=20)
-        ax.set_title('MDE-Stereo Depth Error Distribution', fontsize=22)
+        ax.set_title('MDE - Stereo Depth Error Distribution', fontsize=22)
         ax.set_xlim(-15, 15)
         ax.set_ylim(0, 0.3)
-        ax.tick_params(axis='both', which='major', labelsize=15)
+        ax.tick_params(axis='both', which='major', labelsize=20)
         ax.legend(fontsize=18)
 
-        plt.savefig(output_path + 'histogram_stack_allPoints' + '.png', dpi=180)
+        plt.savefig(output_path + f'{dataset}_histogram_stack_allPoints' + '.png', dpi=180)
         plt.close('all')
 
+        # display figure in notebook
+        display(Image(output_path + f'{dataset}_histogram_stack_allPoints.png', width=800))
 
 
 
+"""MDE GCP PLOTS"""
+def create_gif(plot_dir, temp_dir, name, image_files_prefix, fps=2):
+
+    # gif_filename = f"{year}{month}{day}_{camera}_{name}.gif"
+    gif_filename = f'{name}.gif'
+    gif_path = os.path.join(plot_dir, gif_filename)
+
+    # Collect and sort image files
+    images = sorted(glob.glob(os.path.join(temp_dir, image_files_prefix + '*')), key=numerical_sort)
+    imgs = [Image.open(img_file) for img_file in images]
+
+    # Save GIF
+    imgs[0].save(gif_path, save_all=True, append_images=imgs[1:], duration=int(1000 / fps), loop=0)
+    print(f"GIF saved to {gif_path}")
+
+    # Save the last frame as PNG
+    # last_frame_filename = f"{year}{month}{day}_{camera}_{name}_last_frame.png"
+    # last_frame_filename = f'{name}_last_frame.png'
+    # last_frame_path = os.path.join(plot_dir, last_frame_filename)
+    # imgs[-1].save(last_frame_path)
+    # print(f"Last frame saved as PNG to {last_frame_path}")
+
+    # Clean out temp directory
+    for img_file in images:
+        os.remove(img_file)
+
+
+def MDE_GCP_comparison_All(output_path):
+
+    #load in data
+    dep_any_data = np.load('./data/dep_any_gcp_.npz')
+    est_bob_dep_any = dep_any_data['bob_estDeps']
+    cal_bob_dep_any = dep_any_data['bob_calDeps']
+    est_mary_dep_any = dep_any_data['mary_estDeps']
+    cal_mary_dep_any = dep_any_data['mary_calDeps']
+
+    dep_prodata = np.load('./data/dep_pro_gcp.npz')
+    est_bob_dep_pro = dep_prodata['bob_estDeps']
+    cal_bob_dep_pro = dep_prodata['bob_calDeps']
+    est_mary_dep_pro = dep_prodata['mary_estDeps']
+    cal_mary_dep_pro = dep_prodata['mary_calDeps']
+
+    glp_data = np.load('./data/glpn_gcp.npz')
+    est_bob_glp = glp_data['bob_estDeps']
+    cal_bob_glp = glp_data['bob_calDeps']
+    est_mary_glp = glp_data['mary_estDeps']
+    cal_mary_glp = glp_data['mary_calDeps']
+
+    zoe_data = np.load('./data/dpt_zoe_gcp.npz')
+    est_bob_zoe = zoe_data['bob_estDeps']
+    cal_bob_zoe = zoe_data['bob_calDeps']
+    est_mary_zoe = zoe_data['mary_estDeps']
+    cal_mary_zoe = zoe_data['mary_calDeps']
+
+    # combine all data for each model
+    bob_estDeps = [est_bob_dep_pro, est_bob_glp, est_bob_zoe, est_bob_dep_any]
+    bob_calDeps = [cal_bob_dep_pro, cal_bob_glp, cal_bob_zoe, cal_bob_dep_any]
+    mary_estDeps = [est_mary_dep_pro, est_mary_glp, est_mary_zoe, est_mary_dep_any]
+    mary_calDeps = [cal_mary_dep_pro, cal_mary_glp, cal_mary_zoe, cal_mary_dep_any]
+
+    #plot error for each model on the same plot
+    fig = plt.figure(figsize=(14, 10))
+    ax = fig.add_subplot(111)
+    labels = ['Depth Pro', 'GLPDepth', 'ZoeDepth', 'Depth Anything']
+    colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red']
+    color_map = dict(zip(labels, colors))
+
+    for i in range(len(labels)):
+        label = labels[i]
+        color = color_map[label]
+
+        ax.scatter(bob_calDeps[i], bob_estDeps[i], s=20, marker='o', color=color, label = label)
+        ax.scatter(mary_calDeps[i], mary_estDeps[i], s=20, marker='x', color=color)
+
+    ax.plot([0, 60], [0, 60], 'k--')
+    marker_text = "Marker Key:\n○ = Bob\n× = Mary"
+    props = dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray')
+    ax.text(0.03, 0.85, marker_text, transform=ax.transAxes,
+            fontsize=12, verticalalignment='top', horizontalalignment='left', bbox=props)
+    ax.set_xlabel('Calculated Depth (m)', fontsize=20)
+    ax.set_ylabel('Estimated Depth (m)', fontsize=20)
+    ax.set_title('Estimated vs Calculated GCP Depths', fontsize=22)
+    ax.set_xlim(0, 60)
+    ax.set_ylim(0, 60)
+    ax.tick_params(axis='both', which='major', labelsize=18)
+    ax.legend()
+    plt.savefig(f'{output_path}GCP_Depth_Comparison_All_Models.png', dpi=180)
+    plt.close('all')
+
+
+def MDE_GCP_comparison(output_path:str, model:str):
+    #pull in data
+
+    if model == 'dep_any':
+        dep_any_data = np.load('./data/dep_any_gcp.npz')
+        est_bob = dep_any_data['bob_estDeps']
+        cal_bob = dep_any_data['bob_calDeps']
+        est_mary = dep_any_data['mary_estDeps']
+        cal_mary = dep_any_data['mary_calDeps']
+
+    elif model == 'dep_pro':
+        dep_prodata = np.load('./data/dep_pro_gcp.npz')
+        est_bob = dep_prodata['bob_estDeps']
+        cal_bob = dep_prodata['bob_calDeps']
+        est_mary = dep_prodata['mary_estDeps']
+        cal_mary = dep_prodata['mary_calDeps']
+
+    elif model == 'glpn':
+        glp_data = np.load('./data/glpn_gcp.npz')
+        est_bob = glp_data['bob_estDeps']
+        cal_bob = glp_data['bob_calDeps']
+        est_mary = glp_data['mary_estDeps']
+        cal_mary = glp_data['mary_calDeps']
+
+    elif model == 'dpt_zoe':
+        zoe_data = np.load('./data/dpt_zoe_gcp.npz')
+        est_bob = zoe_data['bob_estDeps']
+        cal_bob = zoe_data['bob_calDeps']
+        est_mary = zoe_data['mary_estDeps']
+        cal_mary = zoe_data['mary_calDeps']
+    else:
+        raise ValueError(f'model: {model} not recognized')
+
+    bob_rmse = np.sqrt(np.sum([(cal_bob[i] - est_bob[i]) ** 2 for i in range(len(cal_bob))]) / len(cal_bob))
+    mary_rmse = np.sqrt(np.sum([(cal_mary[i] - est_mary[i]) ** 2 for i in range(len(cal_mary))]) / len(cal_mary))
+
+    #plot total data for bob and mary cams
+    fig = plt.figure(figsize=(14, 10))
+    ax = fig.add_subplot(111)
+    ax.plot(cal_bob, est_bob, 'ro', markersize=5, label='Bob Cams')
+    ax.plot(cal_mary, est_mary, 'bo', markersize=5, label='Mary Cams')
+    ax.set_xlabel('Calculated GCP Depth (m)')
+    ax.set_ylabel('Estimated Depth (m)')
+    ax.set_title('Estimated vs Calculated GCP Depths for Bob and Mary Cams')
+    ax.plot([0, 80], [0, 80], 'k--')  # line y=x for reference
+    ax.text(0.05, 0.95, f'Bob RMSE: {bob_rmse:.2f}m\nMary RMSE: {mary_rmse:.2f}m', transform=ax.transAxes, fontsize=12, verticalalignment='top', bbox=dict(facecolor='white', alpha=0.5))
+    ax.legend()
+    plt.savefig(f'./{output_path}GCP_depth_comparison_{model}.png', dpi=180)
+
+
+def velocity_plot(output_path:str, dataset:str, fps:int=1):
+
+    # load in data - change this if you want to visualize other data
+    dt = 1 / fps
+    dep_maps = np.load(f'./Depth_Anything_V2/data/{dataset}_mde.npy')
+    velocities = np.diff(dep_maps, axis=0) / dt
+    stdDev = 2*(np.std(velocities, axis=0)) # 95% of data within 2 std devs
+
+    #read raw images. cv2.imread glob.glob the dataset folder for the first 30 images.
+    img_paths = sorted(glob.glob(f'/mnt/e/towerframes/{dataset}*/**/*.tiff', recursive=True), key=numerical_sort)
+    raw_images = [cv2.imread(img) for img in img_paths[:31]]
+
+    print('Plotting...')
+    for i in range(len(velocities)):
+        fig = plt.figure(figsize=(20, 10))
+        gs = gridspec.GridSpec(2, 2)
+
+        ax = fig.add_subplot(gs[0, 0])
+        ax.imshow(raw_images[i], aspect='auto')
+        ax.set_title('Raw Image', fontsize=22)
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        ax1 = fig.add_subplot(gs[0, 1])
+        plot1 = ax1.imshow(dep_maps[i], aspect='auto', vmin=0, vmax=80)
+        ax1.set_title('Instantaneous Depth', fontsize=22)
+        ax1.set_xticks([])
+        ax1.set_yticks([])
+
+        ax2 = fig.add_subplot(gs[1, 0])
+        plot2 = ax2.imshow(velocities[i],cmap='coolwarm', aspect='auto', vmin=-1, vmax=1)
+        ax2.set_title('Instantaneous Velocity', fontsize=22)
+        ax2.set_xticks([])
+        ax2.set_yticks([])
+
+        ax3 = fig.add_subplot(gs[1, 1])
+        plot3 = ax3.imshow(stdDev, cmap='OrRd', norm=colors.LogNorm(), aspect='auto')
+        ax3.set_title('2 * Standard Deviation', fontsize=22)
+        ax3.set_xticks([])
+        ax3.set_yticks([])
+
+        cbar = fig.colorbar(plot1, ax=ax1, orientation='vertical', fraction=0.046, pad=0.04,
+                            ticks=np.arange(0, 84, 4)[::2])
+        cbar.ax.tick_params(labelsize=15)
+        cbar2 = fig.colorbar(plot2, ax=ax2, orientation='vertical', fraction=0.046, pad=0.04)
+        cbar2.ax.tick_params(labelsize=15)
+        cbar3 = fig.colorbar(plot3, ax=ax3, orientation='vertical', fraction=0.046, pad=0.04)
+        cbar3.ax.tick_params(labelsize=15)
+        cbar.set_label('Depth (m)', fontsize=15)
+        cbar2.set_label('Velocity (m/s)', fontsize=15)
+        cbar3.set_label('2 * Standard Deviation (m/s)', fontsize=15)
+
+        plt.tight_layout()
+        plt.savefig(f'{output_path}velocity_map_{i}.png', dpi=200)
+        plt.close('all')
+    print('done')
 
 
 
@@ -895,47 +1199,6 @@ def four_panel_gcp_velocity(sp1, sp2, sp3, sp4, UV, ind, UV_vel, img_path, outpu
     plt.close('all')
 
 
-def error_plot(estimated_depth, calculated_depth, rmse, date, camera, output_path, vmax=60):
-
-    fig = plt.figure(figsize=(10, 6))
-    ax = fig.add_subplot(111)
-    ax.plot([calculated_depth[i][1] for i in range(len(calculated_depth))], estimated_depth, 'ro', markersize=5)
-    for i in range(len(calculated_depth)):
-        ax.annotate(f'{int(calculated_depth[i][0])}', xy=(calculated_depth[i][1], estimated_depth[i]),
-                    xytext=(4, -1), textcoords='offset points', color='black', fontsize=5.5)
-    ax.set_xlabel('Calculated GCP Depth (m)')
-    ax.set_ylabel('Estimated Depth (m)')
-    ax.set_title(
-        f'{str(date.year)}{date.month:02d}{date.day:02d}{camera} Est v Cal GCP Depths: RMSE = {rmse:.2f}m')
-    ax.plot([0, vmax], [0, vmax], 'k--')  # line y=x for reference
-    plt.savefig(
-        f'{os.path.dirname(output_path.rstrip('/'))}/outputs/gcp/{str(date.year)}{date.month:02d}{date.day:02d}_{camera}' + '_gcp_error.png',
-        dpi=180)
-    # plt.show()
-    plt.close('all')
-
-
-def error_comparison(est_depths: list, cal_depths: list, labels: list, rmse: list, output_path, vmax=80):
-
-    # est_depths, cal_depths should be a list of lists
-    # labels should be a list of strings
-
-    fig = plt.figure(figsize=(14, 10))
-    ax = fig.add_subplot(111)
-
-    for i in range(len(labels)):
-        ax.scatter(cal_depths[i], est_depths[i], s=20, marker='o', label=labels[i])
-
-    ax.set_xlabel('Calculated GCP Depth (m)')
-    ax.set_ylabel('Estimated Depth (m)')
-    ax.set_title('Estimated vs Calculated GCP Depths')
-    ax.plot([0, vmax], [0, vmax], 'k--')  # line y=x for reference
-    ax.text(0.05, 0.95, f'Bob RMSE: {rmse[0]:.2f}m\nMary RMSE: {rmse[1]:.2f}m', transform=ax.transAxes,
-            fontsize=12, verticalalignment='top', bbox=dict(facecolor='white', alpha=0.5))
-    ax.legend()
-    plt.savefig(f'{os.path.dirname(output_path.rstrip('/'))}/outputs/gcp/allData' + '_gcp_depth_comparison.png',
-                dpi=180)
-    plt.close('all')
 
 
 
