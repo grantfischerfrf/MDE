@@ -1,5 +1,5 @@
-from depth_utils import comp_timestamps, numerical_sort
-from plot_utils import load_ms_output, read_dict, clip_data, bin_data, cal_rmses
+from depth_utils import compare_timestamps, numerical_sort
+from plot_utils import load_ms_output, read_dictionary, clip_depth_maps, bin_data, calculate_RMSEs
 
 import os
 import glob
@@ -13,7 +13,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from IPython.display import Image, display
 
 
-def panel_plot(data_folder:str, output_path:str, dataset:str):
+def error_metrics(data_folder:str, output_path:str, dataset:str):
 
     RGB_dict_list = load_ms_output(cam='RGB', dataset=dataset, data_folder=data_folder)
     # rename dictionary keys
@@ -22,12 +22,12 @@ def panel_plot(data_folder:str, output_path:str, dataset:str):
 
     NIR_dict_list = load_ms_output(cam='NIR', dataset=dataset, data_folder=data_folder)
 
-    dicts = comp_timestamps(RGB_dict_list + NIR_dict_list)
+    dicts = compare_timestamps(RGB_dict_list + NIR_dict_list)
 
-    rgb_images, rgb_mde_depths, rgb_stereo_depths, nir_images, nir_mde_depths, nir_stereo_depths = read_dict('BOTH', dicts)
+    rgb_images, rgb_mde_depths, rgb_stereo_depths, nir_images, nir_mde_depths, nir_stereo_depths = read_dictionary('BOTH', dicts)
 
-    rgb_mde_depths_, rgb_stereo_depths_, rgb_horizons = clip_data(rgb_images, rgb_mde_depths, rgb_stereo_depths, 'RGB')
-    nir_mde_depths_, nir_stereo_depths_, nir_horizons = clip_data(nir_images, nir_mde_depths, nir_stereo_depths, 'NIR')
+    rgb_mde_depths_, rgb_stereo_depths_, rgb_horizons = clip_depth_maps(rgb_images, rgb_mde_depths, rgb_stereo_depths, 'RGB')
+    nir_mde_depths_, nir_stereo_depths_, nir_horizons = clip_depth_maps(nir_images, nir_mde_depths, nir_stereo_depths, 'NIR')
 
     rgb_X, rgb_mde_mean, rgb_mde_std_dev = bin_data(rgb_stereo_depths_, rgb_mde_depths_, n_bins=81)
     nir_X, nir_mde_mean, nir_mde_std_dev = bin_data(nir_stereo_depths_, nir_mde_depths_, n_bins=81)
@@ -150,7 +150,7 @@ def panel_plot(data_folder:str, output_path:str, dataset:str):
     print('done')
 
 
-def panel_plot_allData(data_folder:str, output_path:str, dataset:str):
+def error_metrics_allData(data_folder:str, output_path:str, dataset:str):
 
     RGB_dict_list = load_ms_output(cam='RGB', dataset=dataset, data_folder=data_folder)
     # rename dictionary keys
@@ -159,12 +159,12 @@ def panel_plot_allData(data_folder:str, output_path:str, dataset:str):
 
     NIR_dict_list = load_ms_output(cam='NIR', dataset=dataset, data_folder=data_folder)
 
-    dicts = comp_timestamps(RGB_dict_list + NIR_dict_list)
+    dicts = compare_timestamps(RGB_dict_list + NIR_dict_list)
 
-    rgb_images, rgb_mde_depths, rgb_stereo_depths, nir_images, nir_mde_depths, nir_stereo_depths = read_dict('BOTH', dicts)
+    rgb_images, rgb_mde_depths, rgb_stereo_depths, nir_images, nir_mde_depths, nir_stereo_depths = read_dictionary('BOTH', dicts)
 
-    rgb_mde_depths_, rgb_stereo_depths_, rgb_horizons = clip_data(rgb_images, rgb_mde_depths, rgb_stereo_depths, 'RGB')
-    nir_mde_depths_, nir_stereo_depths_, nir_horizons = clip_data(nir_images, nir_mde_depths, nir_stereo_depths, 'NIR')
+    rgb_mde_depths_, rgb_stereo_depths_, rgb_horizons = clip_depth_maps(rgb_images, rgb_mde_depths, rgb_stereo_depths, 'RGB')
+    nir_mde_depths_, nir_stereo_depths_, nir_horizons = clip_depth_maps(nir_images, nir_mde_depths, nir_stereo_depths, 'NIR')
 
     rgb_X, rgb_mde_mean, rgb_mde_std_dev = bin_data(rgb_stereo_depths_, rgb_mde_depths_, n_bins=81)
     nir_X, nir_mde_mean, nir_mde_std_dev = bin_data(nir_stereo_depths_, nir_mde_depths_, n_bins=81)
@@ -265,19 +265,19 @@ def panel_plot_allData(data_folder:str, output_path:str, dataset:str):
     display(Image(output_path + f'{dataset}_DepthComp_allData.png', width=800))
 
 
-def depth_comp(data_folder:str, output_path:str, flag:str, dataset:str):
+def depth_comparison(data_folder:str, output_path:str, flag:str, dataset:str):
 
     dict_list = load_ms_output(cam=flag, dataset=dataset, data_folder=data_folder)
 
-    dicts = comp_timestamps(dict_list)
+    dicts = compare_timestamps(dict_list)
 
-    images, mde_depths, stereo_depths = read_dict(flag, dicts)
+    images, mde_depths, stereo_depths = read_dictionary(flag, dicts)
 
-    mde_depths_, stereo_depths_, horizons = clip_data(images, mde_depths, stereo_depths, flag)
+    mde_depths_, stereo_depths_, horizons = clip_depth_maps(images, mde_depths, stereo_depths, flag)
 
     abs_diff = np.abs(stereo_depths_ - mde_depths_) # Absolute Difference between MDE and StereoDepth
 
-    rmse, rmse_10m, rmse_20m, rmse_40m, rmse_p, rmse_10p, rmse_20p, rmse_40p = cal_rmses(mde_depths_, stereo_depths_, abs_diff)
+    rmse, rmse_10m, rmse_20m, rmse_40m, rmse_p, rmse_10p, rmse_20p, rmse_40p = calculate_RMSEs(mde_depths_, stereo_depths_, abs_diff)
 
     print('Plotting...')
     for i in range(len(images)):
@@ -383,11 +383,11 @@ def one_to_one(data_folder:str, output_path:str, flag:str, dataset:str, all_data
 
     dict_list = load_ms_output(cam=flag, dataset=dataset, data_folder=data_folder)
 
-    dicts = comp_timestamps(dict_list)
+    dicts = compare_timestamps(dict_list)
 
-    images, mde_depths, stereo_depths = read_dict(flag, dicts)
+    images, mde_depths, stereo_depths = read_dictionary(flag, dicts)
 
-    mde_depths_, stereo_depths_, _ = clip_data(images, mde_depths, stereo_depths, flag)
+    mde_depths_, stereo_depths_, _ = clip_depth_maps(images, mde_depths, stereo_depths, flag)
 
     rmse = np.sqrt(np.nanmean((stereo_depths_ - mde_depths_) ** 2, axis=(1, 2)))  # Calculate RMSE for each depth map
 
@@ -443,11 +443,11 @@ def histogram(data_folder:str, output_path:str, flag:str, dataset:str=None, all_
 
     dict_list = load_ms_output(cam=flag, dataset=dataset, data_folder=data_folder)
 
-    dicts = comp_timestamps(dict_list)
+    dicts = compare_timestamps(dict_list)
 
-    images, mde_depths, stereo_depths = read_dict(flag, dicts)
+    images, mde_depths, stereo_depths = read_dictionary(flag, dicts)
 
-    mde_depths_, stereo_depths_, _ = clip_data(images, mde_depths, stereo_depths, flag)
+    mde_depths_, stereo_depths_, _ = clip_depth_maps(images, mde_depths, stereo_depths, flag)
 
     if not all_data:
         print('Plotting...')
@@ -500,11 +500,11 @@ def heatmap(data_folder:str, output_path:str, flag:str, dataset:str=None, all_da
 
     dict_list = load_ms_output(cam=flag, dataset=dataset, data_folder=data_folder)
 
-    dicts = comp_timestamps(dict_list)
+    dicts = compare_timestamps(dict_list)
 
-    images, mde_depths, stereo_depths = read_dict(flag, dicts)
+    images, mde_depths, stereo_depths = read_dictionary(flag, dicts)
 
-    mde_depths_, stereo_depths_, _ = clip_data(images, mde_depths, stereo_depths, flag)
+    mde_depths_, stereo_depths_, _ = clip_depth_maps(images, mde_depths, stereo_depths, flag)
 
     if not all_data:
         # plot scatter density/heatmap of all points
@@ -574,15 +574,15 @@ def heatmap(data_folder:str, output_path:str, flag:str, dataset:str=None, all_da
         display(Image(output_path + f'{flag}_{dataset}_total_heatmap.png', width=800))
 
 
-def fill_plot(data_folder:str, output_path:str, flag:str, dataset:str=None, all_data:bool=False):
+def fill_between_plot(data_folder:str, output_path:str, flag:str, dataset:str=None, all_data:bool=False):
 
     dict_list = load_ms_output(cam=flag, dataset=dataset, data_folder=data_folder)
 
-    dicts = comp_timestamps(dict_list)
+    dicts = compare_timestamps(dict_list)
 
-    images, mde_depths, stereo_depths = read_dict(flag, dicts)
+    images, mde_depths, stereo_depths = read_dictionary(flag, dicts)
 
-    mde_depths_, stereo_depths_, _ = clip_data(images, mde_depths, stereo_depths, flag)
+    mde_depths_, stereo_depths_, _ = clip_depth_maps(images, mde_depths, stereo_depths, flag)
 
     X, mde_mean, mde_std_dev = bin_data(stereo_depths_, mde_depths_, n_bins=81)
 
@@ -650,7 +650,7 @@ def fill_plot(data_folder:str, output_path:str, flag:str, dataset:str=None, all_
         display(Image(output_path + f'{flag}_{dataset}_all_data.png', width=800))
 
 
-def fill_overlay(data_folder:str, output_path:str, dataset:str, all_data:bool=False):
+def fill_between_overlay(data_folder:str, output_path:str, dataset:str, all_data:bool=False):
 
     RGB_dict_list = load_ms_output(cam='RGB', dataset=dataset, data_folder=data_folder)
     # rename dictionary keys
@@ -659,12 +659,12 @@ def fill_overlay(data_folder:str, output_path:str, dataset:str, all_data:bool=Fa
 
     NIR_dict_list = load_ms_output(cam='NIR', dataset=dataset, data_folder=data_folder)
 
-    dicts = comp_timestamps(RGB_dict_list + NIR_dict_list)
+    dicts = compare_timestamps(RGB_dict_list + NIR_dict_list)
 
-    rgb_images, rgb_mde_depths, rgb_stereo_depths, nir_images, nir_mde_depths, nir_stereo_depths = read_dict('BOTH', dicts)
+    rgb_images, rgb_mde_depths, rgb_stereo_depths, nir_images, nir_mde_depths, nir_stereo_depths = read_dictionary('BOTH', dicts)
 
-    rgb_mde_depths_, rgb_stereo_depths_, _ = clip_data(rgb_images, rgb_mde_depths, rgb_stereo_depths, 'RGB')
-    nir_mde_depths_, nir_stereo_depths_, _ = clip_data(nir_images, nir_mde_depths, nir_stereo_depths, 'NIR')
+    rgb_mde_depths_, rgb_stereo_depths_, _ = clip_depth_maps(rgb_images, rgb_mde_depths, rgb_stereo_depths, 'RGB')
+    nir_mde_depths_, nir_stereo_depths_, _ = clip_depth_maps(nir_images, nir_mde_depths, nir_stereo_depths, 'NIR')
 
     rgb_X, rgb_mde_mean, rgb_mde_std_dev = bin_data(rgb_stereo_depths_, rgb_mde_depths_, n_bins=81)
     nir_X, nir_mde_mean, nir_mde_std_dev = bin_data(nir_stereo_depths_, nir_mde_depths_, n_bins=81)
@@ -755,12 +755,12 @@ def one_to_one_overlay(data_folder:str, output_path:str, dataset:str, all_data:b
 
     NIR_dict_list = load_ms_output(cam='NIR', dataset=dataset, data_folder=data_folder)
 
-    dicts = comp_timestamps(RGB_dict_list + NIR_dict_list)
+    dicts = compare_timestamps(RGB_dict_list + NIR_dict_list)
 
-    rgb_images, rgb_mde_depths, rgb_stereo_depths, nir_images, nir_mde_depths, nir_stereo_depths = read_dict('BOTH', dicts)
+    rgb_images, rgb_mde_depths, rgb_stereo_depths, nir_images, nir_mde_depths, nir_stereo_depths = read_dictionary('BOTH', dicts)
 
-    rgb_mde_depths_, rgb_stereo_depths_, _ = clip_data(rgb_images, rgb_mde_depths, rgb_stereo_depths, 'RGB')
-    nir_mde_depths_, nir_stereo_depths_, _ = clip_data(nir_images, nir_mde_depths, nir_stereo_depths, 'NIR')
+    rgb_mde_depths_, rgb_stereo_depths_, _ = clip_depth_maps(rgb_images, rgb_mde_depths, rgb_stereo_depths, 'RGB')
+    nir_mde_depths_, nir_stereo_depths_, _ = clip_depth_maps(nir_images, nir_mde_depths, nir_stereo_depths, 'NIR')
 
     rgb_rmse = np.sqrt(np.nanmean((rgb_stereo_depths_ - rgb_mde_depths_)**2, axis=(1, 2)))
     nir_rmse = np.sqrt(np.nanmean((nir_stereo_depths_ - nir_mde_depths_)**2, axis=(1, 2)))
@@ -826,12 +826,12 @@ def histogram_stack(data_folder:str, output_path:str, dataset:str, all_data:bool
 
     NIR_dict_list = load_ms_output(cam='NIR', dataset=dataset, data_folder=data_folder)
 
-    dicts = comp_timestamps(RGB_dict_list + NIR_dict_list)
+    dicts = compare_timestamps(RGB_dict_list + NIR_dict_list)
 
-    rgb_images, rgb_mde_depths, rgb_stereo_depths, nir_images, nir_mde_depths, nir_stereo_depths = read_dict('BOTH', dicts)
+    rgb_images, rgb_mde_depths, rgb_stereo_depths, nir_images, nir_mde_depths, nir_stereo_depths = read_dictionary('BOTH', dicts)
 
-    rgb_mde_depths_, rgb_stereo_depths_, _ = clip_data(rgb_images, rgb_mde_depths, rgb_stereo_depths, 'RGB')
-    nir_mde_depths_, nir_stereo_depths_, _ = clip_data(nir_images, nir_mde_depths, nir_stereo_depths, 'NIR')
+    rgb_mde_depths_, rgb_stereo_depths_, _ = clip_depth_maps(rgb_images, rgb_mde_depths, rgb_stereo_depths, 'RGB')
+    nir_mde_depths_, nir_stereo_depths_, _ = clip_depth_maps(nir_images, nir_mde_depths, nir_stereo_depths, 'NIR')
 
     #difference stereo and mde to plot
     rgb_diff = rgb_mde_depths_ - rgb_stereo_depths_
@@ -1039,6 +1039,7 @@ def MDE_GCP_comparison(output_path:str, model:str):
 
 def velocity_plot(output_path:str, dataset:str, fps:int=1):
 
+    #replace the data loading with what you want, plotting works.
     # load in data - change this if you want to visualize other data
     dt = 1 / fps
     dep_maps = np.load(f'./Depth_Anything_V2/data/{dataset}_mde.npy')
@@ -1047,7 +1048,7 @@ def velocity_plot(output_path:str, dataset:str, fps:int=1):
 
     #read raw images. cv2.imread glob.glob the dataset folder for the first 30 images.
     img_paths = sorted(glob.glob(f'/mnt/e/towerframes/{dataset}*/**/*.tiff', recursive=True), key=numerical_sort)
-    raw_images = [cv2.imread(img) for img in img_paths[:31]]
+    raw_images = [cv2.imread(img) for img in img_paths[:31]]  #I know this is hardcoded, sorry.
 
     print('Plotting...')
     for i in range(len(velocities)):

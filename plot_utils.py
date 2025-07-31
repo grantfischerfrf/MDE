@@ -1,11 +1,11 @@
-from depth_utils import pull_data
+from depth_utils import pull_dictionary_data
 
 import cv2
 import numpy as np
 from tqdm import tqdm
 
 
-def shift_data(data:np.ndarray, num_pixels:int=16):
+def shift_stereo_data(data:np.ndarray, num_pixels:int=16):
 
     #shift data left x number of pixels to match to correct for offset caused by baseline of stereo cameras.
     shift = num_pixels
@@ -18,6 +18,45 @@ def shift_data(data:np.ndarray, num_pixels:int=16):
 def mask_horizon(raw_image:np.ndarray, canny_thres1:int=170,
                  canny_thres2:int=9700, hough_thres:int=100,
                  min_line_length:int=100, max_line_gap:int=10):
+    """
+        Detect the horizon line in an image using cv2 Canny edge detection and Hough line transform.
+
+        This function processes the input image using Canny edge detection followed by a Hough line transform
+        to detect potential horizon lines. The topmost horizontal line is selected, extended across the image,
+        and a mask is generated to highlight the area above the detected horizon line.
+
+        Parameters
+        ----------
+        raw_image : numpy.ndarray
+            The input image, which can be either grayscale or color.
+
+        canny_thres1 : int
+            The first threshold for the Canny edge detection.
+            Hysteresis thresholding - read cv2.Canny() documentation for more info.
+
+        canny_thres2 : int
+            The second threshold for the Canny edge detection.
+
+        hough_thres : int
+            The threshold parameter for the Hough Line Transform. The higher the threshold,
+            the fewer the detected lines.
+            accumulator threshold - read cv2.HoughLinesP() documentation for more info.
+
+        min_line_length : int
+            The minimum length of a line (in pixels) that should be considered for detection.
+
+        max_line_gap : int
+            The maximum gap between line segments to be considered as a single line.
+
+        Returns
+        -------
+        mask : numpy.ndarray
+            A binary mask where the region above the detected horizon is set to 255 and the rest to 0.
+
+        horizon : tuple
+            The coordinates of the detected horizon line in the form (xstart, xend, ystart, yend),
+            where (xstart, ystart) and (xend, yend) represent the endpoints of the extended line.
+    """
 
     # Use canny edge detection and hough line transform to find best line to match horizon
     canny = cv2.Canny(image=raw_image, threshold1=canny_thres1, threshold2=canny_thres2, apertureSize=7, L2gradient=False)
@@ -68,21 +107,56 @@ def load_ms_output(cam:str, dataset:str, data_folder:str):
     if cam == 'RGB':
 
         rgb_mde = np.load(f'{data_folder}/{dataset}_ms2_aux_image_rect_color_mde.npy', allow_pickle=True).item()  # RGB mde depth
-        left_depth = pull_data(f'./data/{dataset}/ms2/left_depth/data.npz')  # stereo depth
-        aux_color_rect = pull_data(f'./data/{dataset}/ms2/aux_image_rect_color/data.npz')  # rgb image
+        left_depth = pull_dictionary_data(f'./data/{dataset}/ms2/left_depth/{dataset}_ms2_left_depth.npz')  # stereo depth
+        aux_color_rect = pull_dictionary_data(f'./data/{dataset}/ms2/aux_image_rect_color/{dataset}_ms2_aux_image_rect_color.npz')  # rgb image
         dict_list = [left_depth, rgb_mde, aux_color_rect]
         return dict_list
 
     if cam == 'NIR':
 
         nir_mde = np.load(f'{data_folder}/{dataset}_ms1_left_image_rect_mde.npy', allow_pickle=True).item()  # NIR mde depth
-        left_depth = pull_data(f'./data/{dataset}/ms1/left_depth/data.npz')  # stereo depth
-        nir_left = pull_data(f'./data/{dataset}/ms1/left_image_rect/data.npz')  # rectified left IR
+        left_depth = pull_dictionary_data(f'./data/{dataset}/ms1/left_depth/{dataset}_ms1_left_depth.npz')  # stereo depth
+        nir_left = pull_dictionary_data(f'./data/{dataset}/ms1/left_image_rect/{dataset}_ms1_left_image_rect.npz')  # rectified left IR
         dict_list = [left_depth, nir_mde, nir_left]
         return dict_list
 
 
-def clip_data(images, mde_depths, stereo_depths, flag:str):
+def clip_depth_maps(images, mde_depths, stereo_depths, flag:str):
+    """
+    Main data processing function. Filters our horizon, LARC, etc...
+
+    This function takes RGB or NIR images, applies horizon masking, shifts stereo depth maps
+    to match the MDE depth maps (for RGB), and then applies other masks to filter out LARC area
+    and depth values greater than or equal to 80 meters. It returns the modified MDE and stereo depth maps,
+    along with the detected horizons.
+
+    Parameters:
+    ----------
+    images : list of numpy.ndarray
+        List of images (RGB or NIR) used for horizon detection.
+
+    mde_depths : list of numpy.ndarray
+        List of MDE depth maps.
+
+    stereo_depths : list of numpy.ndarray
+        List of Stereo depth maps.
+
+    flag : str
+        A string flag that indicates the type of images:
+        - 'RGB' : RGB images
+        - 'NIR' : NIR images
+
+    Returns:
+    -------
+    mde_depths_ : numpy.ndarray
+        Clipped MDE depth maps with applied masks (NaN for masked areas).
+
+    stereo_depths_ : numpy.ndarray
+        Clipped stereo depth maps with applied masks (NaN for masked areas).
+
+    horizons : numpy.ndarray
+        Detected horizon positions for each image.
+    """
 
     #takes arrays and returns clipped versions of them. Flag is either 'RGB' or 'NIR'
     #make copies of arrays for clipping and calculations
@@ -102,7 +176,7 @@ def clip_data(images, mde_depths, stereo_depths, flag:str):
 
     if flag == 'RGB':
         # MDE prediction is run off of RGB image. Stereo is calculated from monochrome cams. Offset in camera location, must shift to correct for it.
-        stereo_depths = shift_data(stereo_depths_, num_pixels=16) # Shift stereo depth map to match MDE depth map
+        stereo_depths_ = shift_stereo_data(stereo_depths_, num_pixels=16) # Shift stereo depth map to match MDE depth map
 
     # apply mask to depth maps and background image
     if masks.ndim > 3:
@@ -133,8 +207,9 @@ def clip_data(images, mde_depths, stereo_depths, flag:str):
     return mde_depths_, stereo_depths_, horizons
 
 
-def read_dict(flag:str, dicts:dict):
+def read_dictionary(flag:str, dicts:dict):
 
+    #reads ms_output dictionaries and returns necessary data to make plots.
     if flag == 'RGB':
         images = dicts['aux_image_rect_color']['messages']  # RGB Image
         mde_depths = dicts['aux_image_rect_color_mde']['messages']  # RGB MDE Depth
@@ -181,9 +256,9 @@ def bin_data(stereo_depths_, mde_depths_, n_bins:int=81):
     return X, mde_mean, mde_std_dev
 
 
-def cal_rmses(mde_depths_, stereo_depths_, abs_diff):
+def calculate_RMSEs(mde_depths_, stereo_depths_, abs_diff):
 
-    #calculate rmse of difference map
+    #calculates rmse values withing different depth ranges.
     rmse = np.sqrt(np.nanmean((abs_diff**2), axis=(1, 2))) # Calculate RMSE for each depth map
     #calculate different RMSE values at different depths
     abs_diff_10m = np.where(abs_diff < 10, abs_diff, np.nan)  # Mask values greater than or equal to 10m

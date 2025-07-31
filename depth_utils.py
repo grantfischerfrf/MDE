@@ -1,5 +1,4 @@
-import models
-from image_processing import xyz2DistUV  #TODO: something with corefunctions or supportfunctions here
+from image_processing import xyz2DistUV
 from ml_depth_pro.src import depth_pro
 
 import re
@@ -16,16 +15,13 @@ from datetime import datetime
 from collections import defaultdict
 
 
-#TODO: write docstrings for confusing functions
-#TODO: change file paths from /mnt/e/ for data to the data folder with ms output
-
 def numerical_sort(string):
 
     parts = re.split(r'(\d+)', string)
     return [int(part) if part.isdigit() else part for part in parts]
 
 
-def pull_data(file_path:str):
+def pull_dictionary_data(file_path:str):
 
     try:
         dict={}
@@ -41,7 +37,7 @@ def pull_data(file_path:str):
         print('If bad zip file, try manually extracting first')
 
 
-def find_ref_dict(dicts:list):
+def find_reference_dict(dicts:list):
 
     #finds the dictionary with the smallest timestamp difference
     best_dict=None
@@ -56,10 +52,27 @@ def find_ref_dict(dicts:list):
     return best_dict
 
 
-def comp_timestamps(dicts:list):
+def compare_timestamps(dicts:list):
+    """
+        Aligns data from multiple dictionaries by matching their timestamps to a reference timestamp.
 
+        This function selects a reference dictionary (using `find_reference_dict`),
+        then aligns the 'messages' and 'timestamps' in the remaining dictionaries
+        to the reference timestamps by finding the closest matching timestamp index.
+        Returns a dictionary where each entry is sorted to match the reference.
+
+        Args:
+            dicts (list): A list of dictionaries. Each dictionary must contain the following keys:
+                - 'name' (str): A name/unique identifier.
+                - 'timestamps' (np.ndarray): Array of timestamps.
+                - 'messages' (np.ndarray): Raw image array corresponding to the timestamps.
+
+        Returns:
+            dict: A dictionary keyed by the 'name' field of each input dictionary.
+                  Each value is a dictionary with aligned 'messages' and 'timestamps'.
+        """
     #Compares timestamps and finds the closest match
-    ref_dict = find_ref_dict(dicts)
+    ref_dict = find_reference_dict(dicts)
     ref_timestamps = ref_dict['timestamps']
 
     #loop through the rest of the dictionaries and sort data by timestamps
@@ -111,7 +124,7 @@ def save_data(save_path: str, data: np.ndarray):
     np.save(save_path, data, allow_pickle=True)
 
 
-def cal_gcpDis(gcp_xyz, extrinsics, ind):
+def calculate_gcpDistance(gcp_xyz, extrinsics, ind):
 
     # Calculate distance from camera to GCP point
     gcp_dis = np.sqrt((gcp_xyz[0] - extrinsics[0][0]) ** 2 + (gcp_xyz[1] - extrinsics[0][1]) ** 2 + (gcp_xyz[2] - extrinsics[0][2]) ** 2)
@@ -119,7 +132,7 @@ def cal_gcpDis(gcp_xyz, extrinsics, ind):
     return gcp_dis
 
 
-def pull_files(file_path):
+def pull_file_dates(file_path):
 
     # use datetime to pull all data collect dates from folder
     date_list = os.listdir(file_path)
@@ -128,18 +141,18 @@ def pull_files(file_path):
     return date_list
 
 
-def pull_txt(year, month, day):
+def pull_GCP_txt_file(year, month, day):
 
     if os.path.isfile(f'./txt/{year}{month}{day}'):
         return f'./txt/{year}{month}{day}.txt'
     else:
-        txt_list = pull_files('./txt')
+        txt_list = pull_file_dates('./txt')
         target_date = datetime(int(year), int(month), int(day))
         closest_date = min(txt_list, key=lambda date: abs(date - target_date))
         return f'./txt/{closest_date.year}{closest_date.month:02d}{closest_date.day:02d}.txt'
 
 
-def pull_ioeo(year, month, day, camera):
+def pull_GCP_ioeo_file(year, month, day, camera):
 
     if os.path.isfile(f'./ioeo/{camera}/{year}{month}{day}_{camera}_IOEOInitial.mat'):
         ioeo = scipy.io.loadmat(f'./ioeo/{camera}/{str(year) + str(month) + str(day)}_{camera}_IOEOInitial.mat')
@@ -149,7 +162,7 @@ def pull_ioeo(year, month, day, camera):
         return intrinsics, extrinsics
 
     else:
-        ioeo_list = pull_files(f'./ioeo/{camera}')
+        ioeo_list = pull_file_dates(f'./ioeo/{camera}')
         target_date = datetime(int(year), int(month), int(day))
         closest_date = min(ioeo_list, key=lambda date: abs(date - target_date))
         ioeo = scipy.io.loadmat(f'./ioeo/{camera}/{closest_date.year}{closest_date.month:02d}{closest_date.day:02d}_{camera}_IOEOInitial.mat')
@@ -159,10 +172,32 @@ def pull_ioeo(year, month, day, camera):
         return intrinsics, extrinsics
 
 
-def processGCP(year, month, day, camera):
+def process_GCP_points(year:str, month:str, day:str, camera:str):
+    """
+    Processes Ground Control Points (GCPs) for a specific date and camera.
 
-    gcp_file = pull_txt(year, month, day)  # pull text file of gcp data
-    intrinsics, extrinsics = pull_ioeo(year, month, day, camera) # pull intrinsics and extrinsics
+    This function performs the following steps:
+    - Loads the GCP coordinate text file for the given date.
+    - Loads camera intrinsics and extrinsics (ioeo file) for the given date.
+    - Computes distances from the camera to each GCP point (excluding the last one - data point for another study).
+    - Projects 3D GCP points into 2D image coordinates (UV space).
+    - Filters out UV coordinates that project to outside the image bounds -> set to (0, 0).
+
+    Args:
+        year (str): Year of the GCP data collection.
+        month (str): Month of the GCP data collection.
+        day (str): Day of the GCP data collection.
+        camera (str): Camera identifier for which IOEO data is pulled.
+
+    Returns:
+        tuple:
+            - UV (np.ndarray): 2D array of pixel coordinates (2 x N) after projection and filtering.
+            - ind (np.ndarray): 1D array of GCP numbers.
+            - gcp_dis (list): List of [index, distance] pairs for GCPs including the GCP# and distance from the camera in meters.
+    """
+
+    gcp_file = pull_GCP_txt_file(year, month, day)  # pull text file of gcp data
+    intrinsics, extrinsics = pull_GCP_ioeo_file(year, month, day, camera) # pull intrinsics and extrinsics
 
     #read_gcp file and output txt of points
     gcp_txt = pd.read_csv(gcp_file, delimiter=',',header=None).to_numpy()  # nx4 shape. index, easting, northing, ortho height
@@ -171,7 +206,7 @@ def processGCP(year, month, day, camera):
     # Calculate distance from camera to each GCP point
     gcp_dis = []
     for i in range(len(gcp_xyz) - 1): #excludes pier point gcp
-        dis = cal_gcpDis(gcp_xyz[i], extrinsics, ind[i])
+        dis = calculate_gcpDistance(gcp_xyz[i], extrinsics, ind[i])
         gcp_dis.append([ind[i], dis])
 
     #convert xyz to uv
@@ -194,12 +229,12 @@ def processVideo(file_path, create_frames=False, new_fps=30):
 
     if create_frames:
 
-        new_fps = original_fps
+        # new_fps = original_fps
 
         out_name = os.path.basename(file_path).split('.')[0] #create output name for frames
         # create output directory if it doesn't exist
         if not os.path.exists(f'./tower_images/video/{out_name}'):
-            os.makedirs(f'./tower_images/video/{out_name}')
+            os.makedirs(f'./tower_images/video/{out_name}') #FIXME: change this and the cv2.imwrite to a generic path
 
         frame_count = 0
         while capture.isOpened():
@@ -221,15 +256,43 @@ def processVideo(file_path, create_frames=False, new_fps=30):
     return original_fps
 
 
-def cal_rmse(estimated_depths, calculated_depths):
+def calculate_rmse(estimated_depths, calculated_depths):
 
     return np.sqrt(np.sum([(calculated_depths[i] - estimated_depths[i]) ** 2 for i in range(len(calculated_depths))]) / len(calculated_depths))
 
 
-def create_input(file_path:str, flag:str='video', date:datetime=None, fps=1):
+def create_input_for_MDE(file_path:str, flag:str='video', date:datetime=None, fps=1):
+    """
+     Creates a list of image file paths to be used as input for an MDE model.
+
+     This function supports two modes of operation:
+     - `'jaiabot'`: Gathers .tiff images collected for the 6.1 hazardous hydro project on a specific date.
+     - `'video'`: Extracts frames from a video file at a specified frame-per-second (fps) rate.
+
+     Args:
+         file_path (str):
+             - For `'jaiabot'`: Root directory containing image folders named by date: YYYYMMDD*.
+             - For `'video'`: Path to the input video file.
+         flag (str, optional):
+             Specifies the mode of operation: `'jaiabot'` or `'video'`. Defaults to `'video'`.
+         date (datetime, optional):
+             Required only if `flag` is `'jaiabot'`. Specifies the collection date of the images.
+         fps (int, optional):
+             Desired frame extraction rate for videos (frames per second). Defaults to 1.
+
+     Returns:
+         tuple or list:
+             - If `flag` is `'jaiabot'`: Returns a tuple (`images`, `date`) where:
+                 - `images` (list of list): Each sublist contains 'n' sorted `.tiff` image paths from a camera directory.
+                 - `date` (datetime): The input date for reference.
+             - If `flag` is `'video'`: Returns a list of `.jpeg` image paths sampled at the specified `fps`.
+
+     Raises:
+         ValueError: If `flag` is `'jaiabot'` but `date` is not provided.
+     """
 
     if flag=='jaiabot':
-        # pulls 6.1 jaiabot collect images from the LaCie to run on different models
+        # pulls 6.1 jaiabot collect images to run on different models
         # set date
         year = str(date.year)
         month = f'{date.month:02d}'
@@ -261,26 +324,26 @@ def create_input(file_path:str, flag:str='video', date:datetime=None, fps=1):
 
 def run_dep_any(model, images, input=None, data_name:str=None):
 
-    # dep_maps = [model.infer_image(cv2.imread(img)) for img in input if os.path.isfile(img)]
+    #run inference using Depth Anything V2 model
     dep_maps = [model.infer_image(read_image(img)) for img in images[:]]
-    #replace raw images with dep_maps in input dict
 
     if type(input) == dict:
         input['messages'] = np.array(dep_maps)
         input['name'] = str(input['name']) + '_mde'
-        save_data(f'./Depth_Anything_V2/data/{data_name}_mde', input)
+        save_data(f'./Depth_Anything_V2/dep_any_data/{data_name}_mde', input)
         print('Data saved.')
 
     else:
         input = np.array(dep_maps)
-        save_data(f'./Depth_Anything_V2/data/{data_name}_mde', input)
-        print('Data saved.')  #TODO: may need to add the camera name here at some point
+        save_data(f'./Depth_Anything_V2/dep_any_data/{data_name}_mde', input)
+        print('Data saved.')  #TODO: add camera name for towerframes at some point if needed. Overwrites if subfolders exist inside the data folder.
 
     return dep_maps
 
 
 def run_glpn(model, device, input, data_name:str=None):
 
+    #run inference using GLPDepth model
     raw_img = np.array([cv2.resize(cv2.cvtColor(read_image(img), cv2.COLOR_BGR2RGB), (640, 480)) for img in input]) #resize for model input and convert images to RGB
     original_shape = read_image(input[0]).shape
 
@@ -301,42 +364,44 @@ def run_glpn(model, device, input, data_name:str=None):
     if type(input) == dict:
         input['messages'] = np.array(dep_maps)
         input['name'] = str(input['name']) + '_mde'
-        save_data(f'./GLPDepth/data/{data_name}_mde', input)
+        save_data(f'./GLPDepth/glpn_data/{data_name}_mde', input)
         print('Data saved.')
 
     else:
         input = np.array(dep_maps)
-        save_data(f'./GLPDepth/data/{data_name}_mde', input)
+        save_data(f'./GLPDepth/glpn_data/{data_name}_mde', input)
         print('Data saved.')
 
 
 def run_dpt_zoe(model, input, data_name:str=None):
 
+    #run inference using ZoeDepth model
     if type(input) == dict:
         dep_maps = [model.infer_pil(Image.fromarray(img).convert('RGB')) for img in input]
 
         input['messages'] = np.array(dep_maps)
         input['name'] = str(input['name']) + '_mde'
-        save_data(f'./ZoeDepth/data/{data_name}_mde', input)
+        save_data(f'./ZoeDepth/zoe_dep_data/{data_name}_mde', input)
         print('Data saved.')
 
     else:
         dep_maps = [model.infer_pil(Image.open(img).convert('RGB')) for img in input if os.path.isfile(img)]  # load images and convert to RGB
 
         input = np.array(dep_maps)
-        save_data(f'./ZoeDepth/data/{data_name}_mde', input)
+        save_data(f'./ZoeDepth/zoe_dep_data/{data_name}_mde', input)
         print('Data saved.')
 
 
 def run_dep_pro(model, transform, input, data_name:str=None):
 
+    #run inference using Depth Pro model
     if type(input) == dict:
         prediction = [model.infer(transform(Image.fromarray(img))) for img in input]
         dep_maps = [pred['depth'].cpu().numpy() for pred in prediction]  # get depth outputs and bring to cpu
 
         input['messages'] = np.array(dep_maps)
         input['name'] = str(input['name']) + '_mde'
-        save_data(f'./ml_depth_pro/data/{data_name}_mde', input)
+        save_data(f'./ml_depth_pro/dep_pro_data/{data_name}_mde', input)
         print('Data saved.')
 
     else:
@@ -344,12 +409,12 @@ def run_dep_pro(model, transform, input, data_name:str=None):
         dep_maps = [pred['depth'].cpu().numpy() for pred in prediction] #get depth outputs and bring to cpu
 
         input = np.array(dep_maps)
-        save_data(f'./ml_depth_pro/data/{data_name}_mde', input)
+        save_data(f'./ml_depth_pro/dep_pro_data/{data_name}_mde', input)
         print('Data saved.')
 
 
 def find_GCP_depths(dep_maps, date:datetime, input, fps:int=1):
-
+    #calculated depth at GCP points
     dt = 1 / fps  # set dt for velocity calculation
     velocities = np.diff(dep_maps, axis=0) / dt
     stdDev = 2 * np.std(velocities, axis=0)  # twice the STD for 95% of data
@@ -361,7 +426,7 @@ def find_GCP_depths(dep_maps, date:datetime, input, fps:int=1):
     cam = re.split('_', os.path.basename(input[0]))  # take first image and split string
     camera = re.split('Cam', cam[0])[1] + cam[1]  # creates string Ex: 'BobA'
 
-    UV, ind, cal_dep = processGCP(year, month, day, camera)  # process GCP data
+    UV, ind, cal_dep = process_GCP_points(year, month, day, camera)  # process GCP data
 
     estimated_depths = []
     calculated_depths = []
@@ -377,16 +442,58 @@ def find_GCP_depths(dep_maps, date:datetime, input, fps:int=1):
     return estimated_depths, calculated_depths, camera
 
 
-def run_towerframes(model, input_path, device:str, run_model:str, data_name=None, gcp:bool=True, transform=None):
+def run_towerframes(model, input_path, device:str, run_model:str, data_name:list, gcp:bool=False, transform=None):
+    """
+    Runs a depth estimation model on tower frame images (6.1 hazardous hydro. project data)),
+    optionally comparing predictions to Ground Control Point (GCP) depth values.
+
+    This function processes frames for each date:
+    - Loads tower images using `create_input_for_MDE` with the 'jaiabot' flag.
+    - Runs the specified model to generate depth maps.
+    - If `gcp` is True, calculates estimated depths from predictions and compares them
+      with calculated GCP-based depths using `find_GCP_depths`.
+    - Organizes outputs into separate lists for Bob and Mary camera groups.
+    - Saves all estimated and GCP-calculated depth values to a `.npz` file.
+
+    Args:
+        model:
+            Preloaded depth estimation model.
+        input_path (str):
+            Path to the root folder containing input image data.
+        device (str):
+            Device identifier (`'cpu'` or `'cuda'`) for model execution.
+        run_model (str):
+            Specifies the model to use. Must be one of:
+            `'dep_any'`, `'glpn'`, `'dpt_zoe'`, or `'dep_pro'`.
+        data_name (list):
+            List of dataset names or camera IDs corresponding to each date.
+        gcp (bool, optional):
+            Whether to compare model predictions against GCP depths. Defaults to False.
+        transform (callable, optional):
+            A transformation function applied to inputs for the `'dep_pro'` model.
+
+    Returns:
+        None
+
+    Saves:
+        Saves a `.npz` file to `./data/{run_model}_gcp.npz` containing:
+            - `bob_estDeps`: Estimated depths from Bob cameras.
+            - `bob_calDeps`: GCP-based depths for Bob cameras.
+            - `mary_estDeps`: Estimated depths from Mary cameras.
+            - `mary_calDeps`: GCP-based depths for Mary cameras.
+
+    Raises:
+        ValueError: If an unknown model name is passed to `run_model`.
+    """
 
     bob_estDeps = []  # bob cams only
     bob_calDeps = []
     mary_estDeps = []  # mary cams only
     mary_calDeps = []
 
-    date_list = pull_files(input_path)
+    date_list = pull_file_dates(input_path)
     for date, name in tqdm(zip(date_list, data_name), total=(len(date_list))):
-        inputs, day = create_input(input_path, 'jaiabot', date)
+        inputs, day = create_input_for_MDE(input_path, 'jaiabot', date)
 
         for input in inputs:
             # run model - get prediction
@@ -421,11 +528,41 @@ def run_towerframes(model, input_path, device:str, run_model:str, data_name=None
              mary_calDeps=mary_calDeps)
 
 
-def run_video(model, input_path, device:str, run_model:str, fps:int=4, data_name=None, transform=None):
+def run_video(model, input_path, device:str, run_model:str, data_name:list, fps:int=4, transform=None):
+    """
+    Runs a depth estimation model on a series of videos.
+
+    For each video file:
+    - Extracts frames at a specified frame-per-second (fps) rate using `create_input_for_MDE`.
+    - Runs the specified model on the extracted frames using the appropriate inference function.
+
+    Args:
+        model:
+            The preloaded model to use for inference.
+        input_path (list):
+            List of paths to input video files.
+        device (str):
+            Device to run the model on (`'cpu'` or `'cuda'`).
+        run_model (str):
+            Specifies which model to use. Must be one of:
+            `'dep_any'`, `'glpn'`, `'dpt_zoe'`, or `'dep_pro'`.
+        data_name (list):
+            List of names corresponding to each video file. Used for labeling or saving output.
+        fps (int, optional):
+            Frame extraction rate from video in frames per second. Defaults to 4.
+        transform (callable, optional):
+            A transformation function to be applied to the input, only used for `'dep_pro'`.
+
+    Returns:
+        None
+
+    Raises:
+        ValueError: If `run_model` is not one of the supported model types.
+    """
 
     for file, name in zip(input_path[:], data_name):
 
-        inputs = create_input(file, 'video', fps=fps)
+        inputs = create_input_for_MDE(file, 'video', fps=fps)
 
         if run_model == 'dep_any':
             run_dep_any(model, inputs, data_name=name)
@@ -437,11 +574,39 @@ def run_video(model, input_path, device:str, run_model:str, fps:int=4, data_name
             run_dep_pro(model, transform, inputs, data_name=name)
 
 
-def run_rawImages(model, inputs:np.ndarray, device:str, run_model:str, fps:int=1, data_name=None, transform=None):
+def run_rawImages(model, inputs:list, device:str, run_model:str, data_name:list, transform=None):
+    """
+    Runs a depth estimation model on a series of dictionaries containing raw image arrays.
 
+    For each input path, this function:
+    - Loads raw image data from a serialized dictionary.
+    - Selects and runs the specified model variant (`dep_any`, `glpn`, `dpt_zoe`, or `dep_pro`).
+    - Passes additional arguments (e.g., device, transform, and data_name) to model-specific runners.
+
+    Args:
+        model:
+            The preloaded model to use for inference.
+        inputs (list):
+            list of paths to raw image dictionary files.
+        device (str):
+            Device to run the model on (`'cpu'` or `'cuda'`).
+        run_model (str):
+            Specifies which model to use. Must be one of:
+            `'dep_any'`, `'glpn'`, `'dpt_zoe'`, or `'dep_pro'`.
+        data_name (list):
+            List of names corresponding to each input. Used for labeling or saving output.
+        transform (callable, optional):
+            A transformation function to be applied to the input, only used for `'dep_pro'`.
+
+    Returns:
+        None
+
+    Raises:
+        ValueError: If `run_model` is not one of the supported options.
+    """
     #pull data
     for path, name in zip(inputs, data_name):
-        input = pull_data(path)
+        input = pull_dictionary_data(path)
         raw_img = input['messages']
 
         #run model
@@ -453,60 +618,4 @@ def run_rawImages(model, inputs:np.ndarray, device:str, run_model:str, fps:int=1
             run_dpt_zoe(model, input, data_name=name)
         elif run_model == 'dep_pro':
             run_dep_pro(model, transform, input, data_name=name)
-
-
-if __name__ == '__main__':
-
-    #select device
-    # device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-    #
-    # #select model
-    # # model = models.dep_any(device, pred='metric')
-    # model = models.glpn(device)
-    # # model = models.intel_zoe(device)
-    # # model, transform = models.dep_pro(device)
-    #
-    # #IR data
-    # input_path = ['/mnt/e/surrogate_lwir_data/skyraiderR80D/fov_offshore/20250508F01_SRH701384881_IR_0007_reverseTransit.TS']
-    # # processVideo(input_path[0], create_frames=True)
-    #
-    # '''RUN VIDEO'''
-    # # input_path = glob.glob('./tower_images/video/*.MOV')
-    # run_video(model, input_path, device, run_model='glpn', fps=2)
-
-    '''RUN TOWERFRAMES'''
-    # input_path = '/mnt/e/towerframes'
-    # run_towerframes(model, input_path, device, run_model='dep_pro', gcp=True)
-
-    # dep_any_data = np.load('./data/depAny_gcp.npz')
-    # bob_estDeps = dep_any_data['bob_estDeps']
-    # bob_calDeps = dep_any_data['bob_calDeps']
-    # mary_estDeps = dep_any_data['mary_estDeps']
-    # mary_calDeps = dep_any_data['mary_calDeps']
-    #
-    # output_path = './Depth_Anything_V2/temp/'
-    # depth_plots.error_comparison(
-    #     [bob_estDeps, mary_estDeps],
-    #     [bob_calDeps, mary_calDeps],
-    #     ['Bob', 'Mary'],
-    #     [cal_rmse(bob_estDeps, bob_calDeps), cal_rmse(mary_estDeps, mary_calDeps)],
-    #     output_path, vmax=60)  # create error comparison plot for all cameras
-
-    # img = cv2.imread('./tower_images/video/S1031511_IR_forwardTransit/S1031511_IR_forwardTransit_413.jpeg')
-    # c = 255 / np.log(1 + np.max(img))  #log transform constant
-    # log_img = c * np.log(1 + img.astype(np.float32))
-    # log_img = cv2.normalize(log_img, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)  # normalize to 0-255
-    #
-    # fig = plt.figure(figsize=(10, 10))
-    # ax = fig.add_subplot(121)
-    # ax2 = fig.add_subplot(122)
-    # ax.imshow(log_img)
-    # ax.set_title('log_img')
-    # ax2.imshow(img)
-    # ax2.set_title('original_img')
-    # ax.axis('off')  # Hide the axes
-    # ax2.axis('off')
-    # plt.tight_layout()
-    # plt.show()
-    # plt.close('all')
 
