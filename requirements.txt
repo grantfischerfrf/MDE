@@ -17,5 +17,6 @@ h5py==3.14.0
 gdown==5.2.0
 regex==2024.11.6
 DateTime==5.5
+jupyter==1.1.1
 
 
